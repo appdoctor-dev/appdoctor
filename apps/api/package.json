@@ -1,0 +1,34 @@
+{
+  "name": "@repo/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "dev": "wrangler dev --port 8787",
+    "deploy": "wrangler deploy --env production",
+    "check-types": "tsc --noEmit",
+    "cf-typegen": "wrangler types",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
+    "keys:generate": "node scripts/generate-license-keys.mjs",
+    "auth:generate": "npx @better-auth/cli@latest generate --config better-auth.config.ts --output ../../packages/db/src/auth-schema.ts --yes",
+    "stripe:listen": "stripe listen --forward-to localhost:8787/api/auth/stripe/webhook"
+  },
+  "dependencies": {
+    "@better-auth/stripe": "^1.7.14",
+    "@hono/zod-validator": "^0.9.1",
+    "@repo/db": "^0.0.0",
+    "better-auth": "^1.7.14",
+    "drizzle-orm": "^0.45.4",
+    "hono": "^4.13.14",
+    "stripe": "^23.1.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@repo/typescript-config": "^0.0.0",
+    "wrangler": "^4.156.0"
+  }
+}

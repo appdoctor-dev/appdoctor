@@ -1,0 +1,14 @@
+{
+	"$schema": "../../node_modules/wrangler/config-schema.json",
+	"name": "appdoctor-admin",
+	"main": "@tanstack/react-start/server-entry",
+	"compatibility_date": "2026-10-23",
+	"compatibility_flags": ["nodejs_compat"],
+	"observability": { "enabled": true },
+	"env": {
+		"production": {
+			// Every request is checked by the API (admin role); Cloudflare Access in front is a cheap extra layer.
+			"routes": [{ "pattern": "admin.appdoctor.app", "custom_domain": true }]
+		}
+	}
+}

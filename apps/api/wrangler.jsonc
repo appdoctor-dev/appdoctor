@@ -1,0 +1,51 @@
+{
+	"$schema": "../../node_modules/wrangler/config-schema.json",
+	"name": "appdoctor-api",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-10-23",
+	"compatibility_flags": ["nodejs_compat"],
+	"observability": { "enabled": true },
+	// Local development defaults. Secrets go in .dev.vars (see .dev.vars.example).
+	"vars": {
+		"API_URL": "http://localhost:8787",
+		"WEB_URL": "http://localhost:3000",
+		"ADMIN_URL": "http://localhost:3001",
+		"EMAIL_FROM": "AppDoctor <hello@appdoctor.app>",
+		"STRIPE_AUTOMATIC_TAX": "false",
+		"LICENSE_GRACE_DAYS": "7"
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "appdoctor",
+			"database_id": "00000000-0000-0000-0000-000000000000",
+			"migrations_dir": "../../packages/db/migrations"
+		}
+	],
+	"r2_buckets": [{ "binding": "RELEASES", "bucket_name": "appdoctor-releases" }],
+	"env": {
+		// `npm run deploy -w @repo/api` deploys this. Replace the domain and the
+		// D1 database_id (`wrangler d1 create appdoctor`) before the first deploy.
+		"production": {
+			"vars": {
+				"API_URL": "https://api.appdoctor.app",
+				"WEB_URL": "https://appdoctor.app",
+				"ADMIN_URL": "https://admin.appdoctor.app",
+				"COOKIE_DOMAIN": ".appdoctor.app",
+				"EMAIL_FROM": "AppDoctor <hello@appdoctor.app>",
+				"STRIPE_AUTOMATIC_TAX": "false",
+				"LICENSE_GRACE_DAYS": "7"
+			},
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "appdoctor",
+					"database_id": "00000000-0000-0000-0000-000000000000",
+					"migrations_dir": "../../packages/db/migrations"
+				}
+			],
+			"r2_buckets": [{ "binding": "RELEASES", "bucket_name": "appdoctor-releases" }],
+			"routes": [{ "pattern": "api.appdoctor.app", "custom_domain": true }]
+		}
+	}
+}

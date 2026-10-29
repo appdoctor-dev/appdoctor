@@ -1,0 +1,24 @@
+{
+  "name": "@repo/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schema": "./src/schema.ts",
+    "./auth-schema": "./src/auth-schema.ts"
+  },
+  "scripts": {
+    "db:generate": "drizzle-kit generate",
+    "check-types": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261029.1",
+    "@repo/typescript-config": "^0.0.0",
+    "drizzle-kit": "^0.31.11"
+  },
+  "dependencies": {
+    "better-auth": "^1.7.14",
+    "drizzle-orm": "^0.45.4"
+  }
+}

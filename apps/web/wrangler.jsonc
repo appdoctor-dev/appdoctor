@@ -1,0 +1,23 @@
+{
+	"$schema": "../../node_modules/wrangler/config-schema.json",
+	"name": "appdoctor-web",
+	"main": "./src/server.ts",
+	"compatibility_date": "2026-10-23",
+	"compatibility_flags": ["nodejs_compat"],
+	"observability": { "enabled": true },
+	"vars": {
+		"SITE_URL": "http://localhost:3000",
+		"API_URL": "http://localhost:8787"
+	},
+	"env": {
+		"production": {
+			"vars": {
+				"SITE_URL": "https://appdoctor.app",
+				"API_URL": "https://api.appdoctor.app"
+			},
+			// Server-side reads (pricing, downloads) go straight to the API worker.
+			"services": [{ "binding": "API", "service": "appdoctor-api-production" }],
+			"routes": [{ "pattern": "appdoctor.app", "custom_domain": true }]
+		}
+	}
+}

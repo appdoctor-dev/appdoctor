@@ -1,0 +1,58 @@
+@import "tailwindcss";
+@import "@fontsource-variable/schibsted-grotesk";
+@plugin "@tailwindcss/typography";
+
+/* AppDoctor: cool paper, navy ink, and two data colors that only ever mean "rank went up" or "rank went down". */
+@theme {
+  --font-sans: "Schibsted Grotesk Variable", ui-sans-serif, system-ui, sans-serif;
+
+  --color-paper: #f6f7f9;
+  --color-surface: #ffffff;
+  --color-ink: #0f1b2d;
+  --color-ink-soft: #4a5568;
+  --color-line: #dfe3ea;
+  --color-up: #138a5b;
+  --color-down: #d9534f;
+  --color-tint: #e3f1ea;
+}
+
+@layer base {
+  html {
+    color-scheme: light;
+    font-feature-settings: "ss01";
+  }
+  body {
+    @apply bg-paper text-ink antialiased;
+  }
+  ::selection {
+    background: var(--color-tint);
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-ink);
+    outline-offset: 2px;
+  }
+}
+
+/* The single orchestrated moment on the page: a rank improving in the hero table. */
+@keyframes rank-up {
+  from {
+    background-color: var(--color-tint);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+.rank-up {
+  animation: rank-up 1.6s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .rank-up {
+    animation: none;
+  }
+}
+
+.prose-doc {
+  @apply prose prose-slate max-w-none prose-headings:font-semibold prose-headings:tracking-tight prose-a:text-ink prose-a:underline-offset-4 prose-code:before:content-none prose-code:after:content-none prose-pre:bg-ink;
+  --tw-prose-body: var(--color-ink);
+  --tw-prose-headings: var(--color-ink);
+}

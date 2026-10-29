@@ -1,0 +1,23 @@
+# Copy to .dev.vars for local development. Never commit .dev.vars.
+
+# openssl rand -base64 32
+BETTER_AUTH_SECRET=
+
+# Use a Stripe sandbox and a restricted key (rk_test_...). Needs write access to
+# Products, Prices, Customers, Checkout Sessions, Customer Portal and Subscriptions,
+# and read access to Charges, Invoices and Invoice Payments.
+STRIPE_SECRET_KEY=
+# From `stripe listen --forward-to localhost:8787/api/auth/stripe/webhook`
+STRIPE_WEBHOOK_SECRET=
+
+# npm run keys:generate -w @repo/api
+LICENSE_SIGNING_KEY=
+
+# Accounts that become admins on first sign-in (comma-separated)
+ADMIN_EMAILS=
+
+# Optional: without it, sign-in links are printed to the API console.
+RESEND_API_KEY=
+# Optional: enables "Continue with Google".
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=

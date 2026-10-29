@@ -1,0 +1,20 @@
+{
+  "extends": "@repo/typescript-config/base.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "types": [
+      "@cloudflare/workers-types"
+    ],
+    "lib": [
+      "ES2022"
+    ]
+  },
+  "include": [
+    "src",
+    "drizzle.config.ts"
+  ]
+}
