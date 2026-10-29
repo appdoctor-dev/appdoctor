@@ -1,0 +1,8 @@
+# gpui-kit builds against the latest stable Rust, and its gpui-pre snapshots
+# use std APIs stabilised after 1.96 (e.g. `Option::map_or_default`). Pin the
+# exact current stable so every contributor and CI build the same compiler;
+# bump it together with gpui-kit.
+[toolchain]
+channel = "1.99.1"
+profile = "minimal"
+components = ["rustfmt", "clippy"]

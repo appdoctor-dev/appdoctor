@@ -1,0 +1,82 @@
+# One Cargo workspace for the native app and its library crates. The JS side of
+# the repo (apps/web, apps/admin, apps/api, packages/*) is a separate npm/turbo
+# workspace and never touches this file.
+#
+# Unlike Cap, the library crates share this workspace with the GPUI app: none
+# of them carries [patch] entries or version pins that fight gpui's tree, so
+# one Cargo.lock keeps shared deps (tokio, rustls, serde, ...) built once.
+[workspace]
+resolver = "3"
+members = ["apps/desktop", "crates/*"]
+default-members = ["apps/desktop", "crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-only"
+repository = "https://github.com/appdoctor/appdoctor"
+publish = false
+
+[workspace.dependencies]
+appdoctor-appstore = { path = "crates/appstore" }
+appdoctor-asc = { path = "crates/asc" }
+appdoctor-apple-ads = { path = "crates/apple-ads" }
+appdoctor-store = { path = "crates/store" }
+appdoctor-scoring = { path = "crates/scoring" }
+appdoctor-entitlement = { path = "crates/entitlement" }
+appdoctor-secrets = { path = "crates/secrets" }
+appdoctor-jwt = { path = "crates/jwt" }
+
+# gpui-kit pins the exact gpui-pre snapshot it was released against and
+# re-exports gpui, gpui-base and gpui-component, so it is the only UI dep.
+gpui-kit = "0.8.1"
+
+anyhow = "1.0.104"
+base64 = "0.23.1"
+dirs = "7.0.0"
+ed25519-dalek = "3.0.0"
+futures = "0.3.34"
+keyring = "4.2.0"
+p256 = { version = "0.14.0", features = ["ecdsa", "pem", "pkcs8"] }
+rand = "0.10.3"
+# reqwest 0.12 rather than 0.13: gpui's own HTTP stack (gpui-pre-reqwest 0.12)
+# already builds hyper-rustls on rustls+ring, so this shares that tree, and it
+# avoids 0.13's default aws-lc-rs provider, which needs CMake/NASM on Windows.
+reqwest = { version = "0.12.28", default-features = false, features = ["json", "rustls-tls-native-roots", "http2", "charset"] }
+rusqlite = { version = "0.41.1", features = ["bundled"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+thiserror = "2.0.21"
+time = { version = "0.3.55", features = ["formatting", "parsing", "serde"] }
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+url = "2.5.8"
+uuid = { version = "1.29.0", features = ["v4"] }
+
+# Profiles follow Cap's desktop-gpui: gpui is unusably slow unoptimised, so
+# dependencies build at opt-level 2 while the app crate stays at 0 and
+# incremental for fast edit-rebuild cycles.
+[profile.dev]
+opt-level = 0
+# Incremental caches for gpui's tree run to gigabytes; only the app crate,
+# which changes on every edit, opts back in below.
+incremental = false
+
+[profile.dev.package."*"]
+opt-level = 2
+debug = "line-tables-only"
+
+# Pure-computation crates that run over many rows (difficulty scoring over
+# every keyword's top results) build optimised even in dev, like Cap's kernels.
+[profile.dev.package.appdoctor-scoring]
+opt-level = 3
+
+[profile.dev.package.appdoctor-desktop]
+incremental = true
+debug = "line-tables-only"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+strip = "symbols"
