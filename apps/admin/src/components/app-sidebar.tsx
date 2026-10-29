@@ -19,7 +19,6 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
-import { authClient } from "@/lib/api"
 
 const nav = [
   { to: "/", label: "Dashboard", icon: LayoutDashboardIcon },
@@ -59,9 +58,12 @@ export function AppSidebar({ email }: { email: string }) {
       <SidebarFooter>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton onClick={() => authClient.signOut()} tooltip="Sign out">
-              <LogOutIcon />
-              <span className="truncate">{email}</span>
+            {/* Ends the Cloudflare Access session for this app. */}
+            <SidebarMenuButton asChild tooltip="Sign out">
+              <a href="/cdn-cgi/access/logout">
+                <LogOutIcon />
+                <span className="truncate">{email}</span>
+              </a>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>

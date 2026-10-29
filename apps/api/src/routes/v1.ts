@@ -50,7 +50,7 @@ export const v1 = new Hono<AppEnv>()
     const plan = sub ? await c.var.db.query.plans.findFirst({ where: eq(plans.id, sub.plan) }) : null;
     const devices = await c.var.db.select().from(activations).where(eq(activations.userId, user.id));
     return c.json({
-      user: { id: user.id, email: user.email, name: user.name, role: user.role },
+      user: { id: user.id, email: user.email, name: user.name },
       subscription: sub && {
         plan: sub.plan,
         planName: plan?.name ?? sub.plan,

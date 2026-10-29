@@ -10,7 +10,7 @@ export const SITE = {
     "AppDoctor is an ASO tool for Mac and Windows. Research App Store keywords with Apple's own search popularity, track your rank in every country, and update your listing in App Store Connect. Your data stays on your computer.",
   // TODO: set to the public repository once it exists.
   sourceUrl: "https://github.com/appdoctor-app/appdoctor",
-  email: "hello@appdoctor.app",
+  email: "hello@appdoctor.so",
 }
 
 export const NAV = [

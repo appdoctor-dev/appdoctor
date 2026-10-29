@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "fdfe8b13-2c54-460a-8594-527816e255d6",
+  "id": "f2dbc619-8f3d-45ed-9675-589422d66da4",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "account": {
@@ -267,13 +267,6 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
-        },
-        "impersonated_by": {
-          "name": "impersonated_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
         }
       },
       "indexes": {
@@ -496,35 +489,6 @@
           "notNull": true,
           "autoincrement": false,
           "default": "(cast(unixepoch('subsecond') * 1000 as integer))"
-        },
-        "role": {
-          "name": "role",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "banned": {
-          "name": "banned",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false,
-          "default": false
-        },
-        "ban_reason": {
-          "name": "ban_reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "ban_expires": {
-          "name": "ban_expires",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
         },
         "stripe_customer_id": {
           "name": "stripe_customer_id",

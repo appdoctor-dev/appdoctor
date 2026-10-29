@@ -1,5 +1,7 @@
 import { createRouter as createTanStackRouter } from '@tanstack/react-router'
 import { routeTree } from './routeTree.gen'
+// Loads TanStack Start's route types (the `server.handlers` option on routes/api/*).
+import type {} from '@tanstack/react-start'
 
 export function getRouter() {
   const router = createTanStackRouter({

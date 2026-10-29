@@ -9,8 +9,7 @@
 	"vars": {
 		"API_URL": "http://localhost:8787",
 		"WEB_URL": "http://localhost:3000",
-		"ADMIN_URL": "http://localhost:3001",
-		"EMAIL_FROM": "AppDoctor <hello@appdoctor.app>",
+		"EMAIL_FROM": "AppDoctor <hello@appdoctor.so>",
 		"STRIPE_AUTOMATIC_TAX": "false",
 		"LICENSE_GRACE_DAYS": "7"
 	},
@@ -28,11 +27,10 @@
 		// D1 database_id (`wrangler d1 create appdoctor`) before the first deploy.
 		"production": {
 			"vars": {
-				"API_URL": "https://api.appdoctor.app",
-				"WEB_URL": "https://appdoctor.app",
-				"ADMIN_URL": "https://admin.appdoctor.app",
-				"COOKIE_DOMAIN": ".appdoctor.app",
-				"EMAIL_FROM": "AppDoctor <hello@appdoctor.app>",
+				"API_URL": "https://api.appdoctor.so",
+				"WEB_URL": "https://appdoctor.so",
+				"COOKIE_DOMAIN": ".appdoctor.so",
+				"EMAIL_FROM": "AppDoctor <hello@appdoctor.so>",
 				"STRIPE_AUTOMATIC_TAX": "false",
 				"LICENSE_GRACE_DAYS": "7"
 			},
@@ -45,7 +43,7 @@
 				}
 			],
 			"r2_buckets": [{ "binding": "RELEASES", "bucket_name": "appdoctor-releases" }],
-			"routes": [{ "pattern": "api.appdoctor.app", "custom_domain": true }]
+			"routes": [{ "pattern": "api.appdoctor.so", "custom_domain": true }]
 		}
 	}
 }

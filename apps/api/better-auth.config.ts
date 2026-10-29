@@ -8,7 +8,6 @@ import type { Bindings } from "./src/env";
 const env = {
   API_URL: "http://localhost:8787",
   WEB_URL: "http://localhost:3000",
-  ADMIN_URL: "http://localhost:3001",
   EMAIL_FROM: "AppDoctor <hello@localhost>",
   BETTER_AUTH_SECRET: "schema-generation-only",
   STRIPE_SECRET_KEY: "sk_test_schema_generation_only",

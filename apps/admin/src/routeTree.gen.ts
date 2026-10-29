@@ -10,22 +10,18 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as AdminRouteImport } from './routes/_admin'
-import { Route as LoginRouteImport } from './routes/login'
 import { Route as AdminIndexRouteImport } from './routes/_admin/index'
 import { Route as AdminAlertsRouteImport } from './routes/_admin/alerts'
 import { Route as AdminPricingRouteImport } from './routes/_admin/pricing'
 import { Route as AdminReleasesRouteImport } from './routes/_admin/releases'
 import { Route as AdminSubscribersRouteImport } from './routes/_admin/subscribers'
+import { Route as ApiWhoamiRouteImport } from './routes/api/whoami'
 import { Route as AdminUsersIndexRouteImport } from './routes/_admin/users.index'
 import { Route as AdminUsersUserIdRouteImport } from './routes/_admin/users.$userId'
+import { Route as ApiAdminSplatRouteImport } from './routes/api/admin/$'
 
 const AdminRoute = AdminRouteImport.update({
   id: '/_admin',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const LoginRoute = LoginRouteImport.update({
-  id: '/login',
-  path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminIndexRoute = AdminIndexRouteImport.update({
@@ -53,6 +49,11 @@ const AdminSubscribersRoute = AdminSubscribersRouteImport.update({
   path: '/subscribers',
   getParentRoute: () => AdminRoute,
 } as any)
+const ApiWhoamiRoute = ApiWhoamiRouteImport.update({
+  id: '/api/whoami',
+  path: '/api/whoami',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AdminUsersIndexRoute = AdminUsersIndexRouteImport.update({
   id: '/users/',
   path: '/users/',
@@ -63,76 +64,88 @@ const AdminUsersUserIdRoute = AdminUsersUserIdRouteImport.update({
   path: '/users/$userId',
   getParentRoute: () => AdminRoute,
 } as any)
+const ApiAdminSplatRoute = ApiAdminSplatRouteImport.update({
+  id: '/api/admin/$',
+  path: '/api/admin/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AdminIndexRoute
-  '/login': typeof LoginRoute
   '/alerts': typeof AdminAlertsRoute
   '/pricing': typeof AdminPricingRoute
   '/releases': typeof AdminReleasesRoute
   '/subscribers': typeof AdminSubscribersRoute
+  '/api/whoami': typeof ApiWhoamiRoute
   '/users/$userId': typeof AdminUsersUserIdRoute
+  '/api/admin/$': typeof ApiAdminSplatRoute
   '/users/': typeof AdminUsersIndexRoute
 }
 export interface FileRoutesByTo {
-  '/login': typeof LoginRoute
   '/alerts': typeof AdminAlertsRoute
   '/pricing': typeof AdminPricingRoute
   '/releases': typeof AdminReleasesRoute
   '/subscribers': typeof AdminSubscribersRoute
+  '/api/whoami': typeof ApiWhoamiRoute
   '/': typeof AdminIndexRoute
   '/users/$userId': typeof AdminUsersUserIdRoute
+  '/api/admin/$': typeof ApiAdminSplatRoute
   '/users': typeof AdminUsersIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_admin': typeof AdminRouteWithChildren
-  '/login': typeof LoginRoute
   '/_admin/alerts': typeof AdminAlertsRoute
   '/_admin/pricing': typeof AdminPricingRoute
   '/_admin/releases': typeof AdminReleasesRoute
   '/_admin/subscribers': typeof AdminSubscribersRoute
+  '/api/whoami': typeof ApiWhoamiRoute
   '/_admin/': typeof AdminIndexRoute
   '/_admin/users/$userId': typeof AdminUsersUserIdRoute
+  '/api/admin/$': typeof ApiAdminSplatRoute
   '/_admin/users/': typeof AdminUsersIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
-    | '/login'
     | '/alerts'
     | '/pricing'
     | '/releases'
     | '/subscribers'
+    | '/api/whoami'
     | '/users/$userId'
+    | '/api/admin/$'
     | '/users/'
   fileRoutesByTo: FileRoutesByTo
   to:
-    | '/login'
     | '/alerts'
     | '/pricing'
     | '/releases'
     | '/subscribers'
+    | '/api/whoami'
     | '/'
     | '/users/$userId'
+    | '/api/admin/$'
     | '/users'
   id:
     | '__root__'
     | '/_admin'
-    | '/login'
     | '/_admin/alerts'
     | '/_admin/pricing'
     | '/_admin/releases'
     | '/_admin/subscribers'
+    | '/api/whoami'
     | '/_admin/'
     | '/_admin/users/$userId'
+    | '/api/admin/$'
     | '/_admin/users/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   AdminRoute: typeof AdminRouteWithChildren
-  LoginRoute: typeof LoginRoute
+  ApiWhoamiRoute: typeof ApiWhoamiRoute
+  ApiAdminSplatRoute: typeof ApiAdminSplatRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -142,13 +155,6 @@ declare module '@tanstack/react-router' {
       path: ''
       fullPath: '/'
       preLoaderRoute: typeof AdminRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/login': {
-      id: '/login'
-      path: '/login'
-      fullPath: '/login'
-      preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_admin/': {
@@ -186,6 +192,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminSubscribersRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/api/whoami': {
+      id: '/api/whoami'
+      path: '/api/whoami'
+      fullPath: '/api/whoami'
+      preLoaderRoute: typeof ApiWhoamiRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_admin/users/': {
       id: '/_admin/users/'
       path: '/users'
@@ -199,6 +212,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/users/$userId'
       preLoaderRoute: typeof AdminUsersUserIdRouteImport
       parentRoute: typeof AdminRoute
+    }
+    '/api/admin/$': {
+      id: '/api/admin/$'
+      path: '/api/admin/$'
+      fullPath: '/api/admin/$'
+      preLoaderRoute: typeof ApiAdminSplatRouteImport
+      parentRoute: typeof rootRouteImport
     }
   }
 }
@@ -227,7 +247,8 @@ const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
   AdminRoute: AdminRouteWithChildren,
-  LoginRoute: LoginRoute,
+  ApiWhoamiRoute: ApiWhoamiRoute,
+  ApiAdminSplatRoute: ApiAdminSplatRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

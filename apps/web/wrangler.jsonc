@@ -12,12 +12,12 @@
 	"env": {
 		"production": {
 			"vars": {
-				"SITE_URL": "https://appdoctor.app",
-				"API_URL": "https://api.appdoctor.app"
+				"SITE_URL": "https://appdoctor.so",
+				"API_URL": "https://api.appdoctor.so"
 			},
 			// Server-side reads (pricing, downloads) go straight to the API worker.
 			"services": [{ "binding": "API", "service": "appdoctor-api-production" }],
-			"routes": [{ "pattern": "appdoctor.app", "custom_domain": true }]
+			"routes": [{ "pattern": "appdoctor.so", "custom_domain": true }]
 		}
 	}
 }

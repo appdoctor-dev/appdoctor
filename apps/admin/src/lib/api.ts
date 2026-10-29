@@ -1,18 +1,8 @@
 import type { AdminApi } from "@repo/api"
-import { adminClient, magicLinkClient } from "better-auth/client/plugins"
-import { createAuthClient } from "better-auth/react"
 import { hc } from "hono/client"
 
-export const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8787"
-
-/** Typed client for the API's /admin routes; the session cookie authorizes every call. */
-export const adminApi = hc<AdminApi>(`${API_URL}/admin`, { init: { credentials: "include" } })
-
-export const authClient = createAuthClient({
-  baseURL: API_URL,
-  plugins: [adminClient(), magicLinkClient()],
-  fetchOptions: { credentials: "include" },
-})
+/** Typed client for the API's admin routes, through this app's Access-protected proxy (routes/api/admin/$.ts). */
+export const adminApi = hc<AdminApi>("/api/admin")
 
 export class ApiError extends Error {
   constructor(

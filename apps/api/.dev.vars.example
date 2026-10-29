@@ -13,9 +13,6 @@ STRIPE_WEBHOOK_SECRET=
 # npm run keys:generate -w @repo/api
 LICENSE_SIGNING_KEY=
 
-# Accounts that become admins on first sign-in (comma-separated)
-ADMIN_EMAILS=
-
 # Optional: without it, sign-in links are printed to the API console.
 RESEND_API_KEY=
 # Optional: enables "Continue with Google".

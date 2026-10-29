@@ -1,0 +1,4 @@
+# Copy to .dev.vars. Cloudflare Access isn't in front of localhost, so this is
+# the identity the local admin uses. Deployed environments ignore it and
+# require a valid Access token (ACCESS_TEAM_DOMAIN / ACCESS_AUD in wrangler.jsonc).
+ACCESS_DEV_EMAIL=you@example.com

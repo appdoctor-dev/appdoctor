@@ -59,12 +59,12 @@ Marketing search terms: **aso tool**, **aso keyword research tools**.
 
 - `apps/api`: Hono on Cloudflare Workers. Better Auth (magic link, Google, device authorization for the desktop app, bearer tokens, admin roles) with the Stripe plugin for subscriptions. D1 (SQLite) via Drizzle; R2 for release files. Signed Ed25519 entitlements let the app run offline for up to 7 days.
 - `apps/web`: TanStack Start marketing site. Landing, pricing (Stripe Checkout), download, account (billing portal, devices), device approval, docs and blog in Markdown. Agent-ready: `llms.txt`, `llms-full.txt`, Markdown for every page (`.md` or `Accept: text/markdown`), sitemap, `robots.txt` with Content-Signal, RSS, JSON-LD, Link headers.
-- `apps/admin`: TanStack Start + shadcn. Dashboard (est. MRR, actives, trials, past due, churn), subscribers, users, devices, pricing editor (creates Stripe products/prices, archives old prices), release uploads to R2 with publish toggle, and Stripe risk alerts (refunds, disputes, early fraud warnings).
+- `apps/admin`: TanStack Start + shadcn, behind Cloudflare Access (Zero Trust); the API's admin routes are only reachable through a private service binding. Dashboard (est. MRR, actives, trials, past due, churn), subscribers, users, devices, pricing editor (creates Stripe products/prices, archives old prices), release uploads to R2 with publish toggle, and Stripe risk alerts (refunds, disputes, early fraud warnings).
 - `apps/desktop` + `crates/*`: the GPUI app (built in a parallel session on its own branch).
 
 ## Open decisions
 
 - Open-source license (AGPL-3.0 like Cap, or another)
 - Exactly what the paid build unlocks versus a source build
-- Production domain, email provider (Resend wired; Cloudflare Email is an alternative), Google OAuth app
+- Email provider (Resend wired; Cloudflare Email is an alternative), Google OAuth app
 - Stripe Tax registrations before charging EU/US customers

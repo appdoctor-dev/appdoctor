@@ -11,11 +11,8 @@ export type Bindings = {
 
   API_URL: string;
   WEB_URL: string;
-  ADMIN_URL: string;
-  /** e.g. ".appdoctor.app" so web, admin and api share one session in production. */
+  /** e.g. ".appdoctor.so" so the website and the API share one session in production. */
   COOKIE_DOMAIN?: string;
-  /** Comma-separated; these accounts get the admin role when they first sign in. */
-  ADMIN_EMAILS?: string;
   EMAIL_FROM: string;
   STRIPE_AUTOMATIC_TAX?: string;
   LICENSE_GRACE_DAYS?: string;
@@ -40,5 +37,7 @@ export type AppEnv = {
     auth: Auth;
     stripe: Stripe;
     user: SessionUser | null;
+    /** Set on admin requests: the Cloudflare Access identity the admin Worker verified. */
+    adminEmail: string;
   };
 };

@@ -2,7 +2,7 @@ import { stripe } from "@better-auth/stripe";
 import { type Db, plans, schema } from "@repo/db";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { admin, bearer, deviceAuthorization, magicLink } from "better-auth/plugins";
+import { bearer, deviceAuthorization, magicLink } from "better-auth/plugins";
 import { asc, eq } from "drizzle-orm";
 import Stripe from "stripe";
 import type { Bindings } from "./env";
@@ -34,18 +34,11 @@ export async function loadStripePlans(db: Db) {
 }
 
 export function createAuth(env: Bindings, db: Db, stripeClient: Stripe = createStripe(env)) {
-  const adminEmails = new Set(
-    (env.ADMIN_EMAILS ?? "")
-      .split(",")
-      .map((e) => e.trim().toLowerCase())
-      .filter(Boolean),
-  );
-
   return betterAuth({
     appName: "AppDoctor",
     baseURL: env.API_URL,
     secret: env.BETTER_AUTH_SECRET,
-    trustedOrigins: [env.WEB_URL, env.ADMIN_URL],
+    trustedOrigins: [env.WEB_URL],
     database: drizzleAdapter(db, { provider: "sqlite", schema }),
     advanced: env.COOKIE_DOMAIN
       ? { crossSubDomainCookies: { enabled: true, domain: env.COOKIE_DOMAIN } }
@@ -54,15 +47,6 @@ export function createAuth(env: Bindings, db: Db, stripeClient: Stripe = createS
       env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET
         ? { google: { clientId: env.GOOGLE_CLIENT_ID, clientSecret: env.GOOGLE_CLIENT_SECRET } }
         : undefined,
-    databaseHooks: {
-      user: {
-        create: {
-          before: async (user) => ({
-            data: { ...user, role: adminEmails.has(user.email.toLowerCase()) ? "admin" : "user" },
-          }),
-        },
-      },
-    },
     plugins: [
       // Passwordless: people buying a desktop app should not have to invent a password.
       magicLink({
@@ -74,7 +58,6 @@ export function createAuth(env: Bindings, db: Db, stripeClient: Stripe = createS
           });
         },
       }),
-      admin(),
       // Lets the desktop app call the API with the token from the device flow.
       bearer(),
       deviceAuthorization({

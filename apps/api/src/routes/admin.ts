@@ -5,7 +5,6 @@ import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../env";
 import { ARCHES, PLATFORMS } from "../lib/releases";
-import { requireAdmin } from "../middleware";
 
 const ENTITLED = ["active", "trialing", "past_due"];
 const DAY_MS = 86_400_000;
@@ -49,9 +48,12 @@ const upload = z.object({
   contentType: z.string().max(100).default("application/octet-stream"),
 });
 
-/** Everything under /admin requires a signed-in user with the admin role. */
+/**
+ * Served only through the AdminEntrypoint service binding (see index.ts), so
+ * nothing here is reachable from the internet. The admin Worker has already
+ * checked the caller's Cloudflare Access identity.
+ */
 export const adminApi = new Hono<AppEnv>()
-  .use(requireAdmin)
 
   .get("/stats", async (c) => {
     const db = c.var.db;
@@ -162,8 +164,6 @@ export const adminApi = new Hono<AppEnv>()
           id: user.id,
           email: user.email,
           name: user.name,
-          role: user.role,
-          banned: user.banned,
           createdAt: user.createdAt,
           stripeCustomerId: user.stripeCustomerId,
         })

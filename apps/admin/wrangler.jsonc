@@ -5,10 +5,23 @@
 	"compatibility_date": "2026-10-23",
 	"compatibility_flags": ["nodejs_compat"],
 	"observability": { "enabled": true },
+	// Only reachable through Cloudflare Access on the custom domain: no workers.dev
+	// or preview URLs that would skip it.
+	"workers_dev": false,
+	"preview_urls": false,
+	// The API's admin routes exist only behind this binding (AdminEntrypoint in apps/api).
+	"services": [{ "binding": "API", "service": "appdoctor-api", "entrypoint": "AdminEntrypoint" }],
 	"env": {
 		"production": {
-			// Every request is checked by the API (admin role); Cloudflare Access in front is a cheap extra layer.
-			"routes": [{ "pattern": "admin.appdoctor.app", "custom_domain": true }]
+			"workers_dev": false,
+			"preview_urls": false,
+			"vars": {
+				// Access application "AppDoctor admin" (policy: Owner) in Zero Trust.
+				"ACCESS_TEAM_DOMAIN": "https://billowing-breeze-edf1.cloudflareaccess.com",
+				"ACCESS_AUD": "8b029c68d78f7efb94da04b0de7504415d3972d9325abd2dd8626611add9de9f"
+			},
+			"services": [{ "binding": "API", "service": "appdoctor-api-production", "entrypoint": "AdminEntrypoint" }],
+			"routes": [{ "pattern": "admin.appdoctor.so", "custom_domain": true }]
 		}
 	}
 }

@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
-import { API_URL, ApiError, adminApi, call } from "@/lib/api"
+import { ApiError, adminApi, call } from "@/lib/api"
 import { bytes, date } from "@/lib/format"
 
 export const Route = createFileRoute("/_admin/releases")({ component: Releases })
@@ -138,8 +138,8 @@ function UploadCard({ onUploaded }: { onUploaded: () => void }) {
         const partNumber = i + 1
         // Raw fetch: the body is a binary chunk, which the typed JSON client does not model.
         const res = await fetch(
-          `${API_URL}/admin/releases/uploads/${encodeURIComponent(uploadId)}/parts/${partNumber}?key=${encodeURIComponent(key)}`,
-          { method: "PUT", credentials: "include", body: file.slice(i * PART_SIZE, (i + 1) * PART_SIZE) },
+          `/api/admin/releases/uploads/${encodeURIComponent(uploadId)}/parts/${partNumber}?key=${encodeURIComponent(key)}`,
+          { method: "PUT", body: file.slice(i * PART_SIZE, (i + 1) * PART_SIZE) },
         )
         const body = await res.json().catch(() => null)
         if (!res.ok) throw new ApiError(res.status, body)

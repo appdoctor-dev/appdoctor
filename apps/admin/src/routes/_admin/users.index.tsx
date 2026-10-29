@@ -2,7 +2,6 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query"
 import { Link, createFileRoute } from "@tanstack/react-router"
 import { useState } from "react"
 import { ErrorNote, PageBody, PageHeader } from "@/components/page"
-import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { adminApi, call } from "@/lib/api"
@@ -42,7 +41,6 @@ function Users() {
             <TableHeader>
               <TableRow>
                 <TableHead>Email</TableHead>
-                <TableHead>Role</TableHead>
                 <TableHead>Stripe customer</TableHead>
                 <TableHead>Joined</TableHead>
               </TableRow>
@@ -54,13 +52,7 @@ function Users() {
                     <Link to="/users/$userId" params={{ userId: u.id }} className="font-medium hover:underline">
                       {u.email}
                     </Link>
-                    {u.banned && (
-                      <Badge variant="destructive" className="ml-2">
-                        banned
-                      </Badge>
-                    )}
                   </TableCell>
-                  <TableCell>{u.role === "admin" ? <Badge>admin</Badge> : "user"}</TableCell>
                   <TableCell className="font-mono text-xs">{u.stripeCustomerId ?? "—"}</TableCell>
                   <TableCell>{date(u.createdAt)}</TableCell>
                 </TableRow>
