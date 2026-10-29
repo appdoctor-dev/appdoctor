@@ -5,17 +5,21 @@
 //!   searches (iTunes Search API) through a [`Throttle`] that limits
 //!   concurrency and backs off when Apple starts refusing requests, since every
 //!   request comes from the user's IP.
-//! - [`SearchSource`] is the seam for keyword search: rank checks depend on the
-//!   trait, so a source that mirrors the App Store's real result order can
-//!   replace the iTunes Search API without touching callers.
+//! - [`NativeSearch`] gets rankings the way the iPhone App Store does
+//!   (Apple's MZStore search with a native storefront header), falling back
+//!   to the iTunes Search API, whose order drifts on competitive terms.
+//! - [`SearchSource`] is the seam rank checks depend on; each
+//!   [`SearchPage`] says which source answered.
 
 mod countries;
 mod itunes;
+mod native;
 mod parse;
 mod throttle;
 
 pub use countries::{COUNTRIES, Country, country};
 pub use itunes::{AppDetails, ITunesClient, SearchHit};
+pub use native::{ITUNES_SOURCE, NATIVE_SOURCE, NativeSearch, native_store_front, storefront_id};
 pub use parse::{AppRef, parse_app_ref};
 pub use throttle::{Throttle, ThrottleConfig};
 
@@ -49,16 +53,32 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// One search's results and where they came from.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SearchPage {
+    /// Every result, in the order the store ranks them.
+    pub ranked: Vec<AppId>,
+    /// Details for the leading results (at least the top 10 when that many
+    /// exist), in rank order. Rank needs only `ranked`; difficulty and the
+    /// "apps in ranking" icons need these.
+    pub top: Vec<SearchHit>,
+    /// Stored with rank snapshots so history from different sources is
+    /// never compared as one series.
+    pub source: &'static str,
+}
+
+impl SearchPage {
+    pub fn rank_of(&self, app: AppId) -> Option<u32> {
+        self.ranked.iter().position(|id| *id == app).map(|ix| ix as u32 + 1)
+    }
+}
+
 /// Where rank checks get search results from.
 ///
-/// Returns hits in the order the store ranks them, at most `limit` long. A
+/// Returns at most `limit` hits in the order the store ranks them. A
 /// keyword's rank for an app is its 1-based position in this list.
 pub trait SearchSource: Send + Sync {
-    fn search<'a>(&'a self, term: &'a str, country: &'a str, limit: usize) -> BoxFuture<'a, Result<Vec<SearchHit>>>;
-
-    /// A short name for the source, stored with rank snapshots so history
-    /// from different sources is never compared as if it were one series.
-    fn name(&self) -> &'static str;
+    fn search<'a>(&'a self, term: &'a str, country: &'a str, limit: usize) -> BoxFuture<'a, Result<SearchPage>>;
 }
 
 /// The 1-based position of `app` in `hits`, or `None` when it isn't there.

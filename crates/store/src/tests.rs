@@ -186,3 +186,20 @@ fn settings_round_trip() {
     store.set_setting("device_id", "b").unwrap();
     assert_eq!(store.setting("device_id").unwrap().as_deref(), Some("b"));
 }
+
+#[test]
+fn change_compares_only_checks_from_the_same_source() {
+    let store = Store::open_in_memory().unwrap();
+    store.upsert_app(&app(1)).unwrap();
+    let id = store.add_keyword(1, "to do list", "us", 1).unwrap();
+    store.record_snapshot(&snapshot(id, 10, Some(75))).unwrap();
+    let mut native = snapshot(id, 20, None);
+    native.source = "app-store-iphone".into();
+    store.record_snapshot(&native).unwrap();
+    // The iTunes rank isn't the previous value of the App Store series.
+    assert_eq!(store.keywords(1).unwrap()[0].change(), RankChange::First);
+    native.checked_at = 30;
+    native.rank = Some(120);
+    store.record_snapshot(&native).unwrap();
+    assert_eq!(store.keywords(1).unwrap()[0].change(), RankChange::Entered);
+}

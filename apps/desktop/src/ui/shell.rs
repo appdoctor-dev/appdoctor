@@ -11,6 +11,7 @@ use crate::theme::{self, meter};
 use crate::ui::apps::AppsView;
 use crate::ui::coming_soon;
 use crate::ui::keywords::KeywordsView;
+use crate::ui::release::ReleaseView;
 use crate::ui::settings::SettingsView;
 use crate::ui::widgets::{app_icon, flag, status_dot};
 
@@ -20,6 +21,7 @@ pub struct Shell {
     state: Entity<AppState>,
     keywords: Entity<KeywordsView>,
     apps: Entity<AppsView>,
+    release: Entity<ReleaseView>,
     settings: Entity<SettingsView>,
     _subscriptions: Vec<Subscription>,
 }
@@ -28,6 +30,7 @@ impl Shell {
     pub fn new(state: Entity<AppState>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let keywords = cx.new(|cx| KeywordsView::new(state.clone(), window, cx));
         let apps = cx.new(|cx| AppsView::new(state.clone(), window, cx));
+        let release = cx.new(|cx| ReleaseView::new(state.clone(), cx));
         let settings = cx.new(|cx| SettingsView::new(state.clone(), window, cx));
         let subscriptions = vec![
             cx.observe(&state, |_, _, cx| cx.notify()),
@@ -37,6 +40,7 @@ impl Shell {
             state,
             keywords,
             apps,
+            release,
             settings,
             _subscriptions: subscriptions,
         }
@@ -155,7 +159,11 @@ impl Shell {
                             state.select_app(id, cx);
                             if !matches!(
                                 state.section,
-                                Section::Rankings | Section::Competitors | Section::Localization | Section::Screenshots
+                                Section::Rankings
+                                    | Section::Competitors
+                                    | Section::Localization
+                                    | Section::Screenshots
+                                    | Section::Release
                             ) {
                                 state.set_section(Section::Keywords, cx);
                             }
@@ -260,7 +268,9 @@ impl Shell {
                         "Screenshots",
                         Section::Screenshots,
                         cx,
-                    )),
+                    ))
+                    .child(Self::group_label("Ship", cx))
+                    .child(self.nav_item("nav-release", IconName::CircleCheck, "App Review", Section::Release, cx)),
             )
             .child(
                 v_flex()
@@ -351,6 +361,7 @@ impl Render for Shell {
         let page = match section {
             Section::Keywords => self.keywords.clone().into_any_element(),
             Section::Apps => self.apps.clone().into_any_element(),
+            Section::Release => self.release.clone().into_any_element(),
             Section::Settings => self.settings.clone().into_any_element(),
             other => coming_soon::render(other, cx),
         };

@@ -45,19 +45,185 @@ fn rejects_bad_p8() {
     assert!(matches!(Credentials::new("i", "k", "not a key"), Err(Error::Key(_))));
 }
 
-#[tokio::test]
-async fn refuses_review_submissions_without_sending() {
-    let (credentials, _) = credentials();
-    // An unroutable base: if the guard failed, this would be a network error instead.
-    let client = Client::new(credentials).with_base_url("http://127.0.0.1:9");
-    for path in [
-        "/v1/reviewSubmissions",
-        "/v1/reviewSubmissionItems",
-        "/v1/appStoreVersionSubmissions",
-    ] {
-        let result: Result<Value> = client.request(Method::POST, path, None).await;
-        assert!(matches!(result, Err(Error::ReviewSubmissionRefused(_))), "{path}");
+fn plan() -> SubmissionPlan {
+    SubmissionPlan {
+        app_id: "904237743".into(),
+        app_name: "Things 3".into(),
+        platform: Platform::Ios,
+        version_id: "ver-1".into(),
+        version: "3.22".into(),
+        version_state: "PREPARE_FOR_SUBMISSION".into(),
+        build_id: "build-1".into(),
+        build: "3.22 (1234)".into(),
+        release_type: ReleaseType::AfterApproval,
+        earliest_release_date: None,
+        uses_non_exempt_encryption: Some(false),
     }
+}
+
+#[tokio::test]
+async fn outward_actions_need_confirmation_and_send_nothing_without_it() {
+    let (credentials, _) = credentials();
+    // An unroutable base: a request that got sent would fail as Http, not NotConfirmed.
+    let client = Client::new(credentials).with_base_url("http://127.0.0.1:9");
+    assert!(matches!(
+        client.submit_for_review(&plan(), false).await,
+        Err(Error::NotConfirmed)
+    ));
+    assert!(matches!(
+        client.cancel_submission("sub-1", false).await,
+        Err(Error::NotConfirmed)
+    ));
+    let file = upload::BuildFile {
+        path: "/nonexistent/App.ipa".into(),
+        platform: Platform::Ios,
+        version: "3.22".into(),
+        build_number: "1234".into(),
+    };
+    assert!(matches!(
+        client.upload_build("1", &file, false, |_, _| {}).await,
+        Err(Error::NotConfirmed)
+    ));
+    // Confirmed calls do go out (and fail here only because nothing listens).
+    assert!(matches!(
+        client.cancel_submission("sub-1", true).await,
+        Err(Error::Http(_))
+    ));
+}
+
+#[test]
+fn plan_summary_names_everything_the_user_must_see() {
+    let summary = plan().summary();
+    for needle in [
+        "Things 3",
+        "904237743",
+        "3.22 (PREPARE_FOR_SUBMISSION)",
+        "3.22 (1234)",
+        "Release automatically when approved",
+        "No non-exempt encryption",
+    ] {
+        assert!(summary.contains(needle), "summary is missing {needle:?}:\n{summary}");
+    }
+    let mut scheduled = plan();
+    scheduled.release_type = ReleaseType::Scheduled;
+    scheduled.earliest_release_date = Some("2026-11-20T08:00:00Z".into());
+    assert!(scheduled.summary().contains("Release date: 2026-11-20T08:00:00Z"));
+}
+
+#[test]
+fn submission_request_bodies() {
+    use serde_json::json;
+    use submission::*;
+    assert_eq!(
+        create_submission_body("904237743", Platform::Ios),
+        json!({"data": {"type": "reviewSubmissions", "attributes": {"platform": "IOS"},
+               "relationships": {"app": {"data": {"type": "apps", "id": "904237743"}}}}})
+    );
+    assert_eq!(
+        submission_item_body("sub-1", "ver-1"),
+        json!({"data": {"type": "reviewSubmissionItems", "relationships": {
+            "reviewSubmission": {"data": {"type": "reviewSubmissions", "id": "sub-1"}},
+            "appStoreVersion": {"data": {"type": "appStoreVersions", "id": "ver-1"}}}}})
+    );
+    assert_eq!(
+        submit_body("sub-1"),
+        json!({"data": {"type": "reviewSubmissions", "id": "sub-1", "attributes": {"submitted": true}}})
+    );
+    assert_eq!(
+        cancel_body("sub-1"),
+        json!({"data": {"type": "reviewSubmissions", "id": "sub-1", "attributes": {"canceled": true}}})
+    );
+    assert_eq!(
+        build_linkage_body("build-1"),
+        json!({"data": {"type": "builds", "id": "build-1"}})
+    );
+    assert_eq!(
+        release_type_body("ver-1", ReleaseType::Scheduled, Some("2026-11-20T08:00:00Z")),
+        json!({"data": {"type": "appStoreVersions", "id": "ver-1",
+               "attributes": {"releaseType": "SCHEDULED", "earliestReleaseDate": "2026-11-20T08:00:00Z"}}})
+    );
+}
+
+#[test]
+fn parses_builds_with_their_versions() {
+    let body = r#"{
+      "data": [
+        {"type": "builds", "id": "b2", "attributes": {"version": "1235", "processingState": "PROCESSING", "expired": false},
+         "relationships": {"preReleaseVersion": {"data": {"type": "preReleaseVersions", "id": "p1"}}}},
+        {"type": "builds", "id": "b1", "attributes": {"version": "1234", "processingState": "VALID", "expired": false,
+          "usesNonExemptEncryption": false, "uploadedDate": "2026-10-20T10:00:00-07:00"},
+         "relationships": {"preReleaseVersion": {"data": {"type": "preReleaseVersions", "id": "p1"}}}},
+        {"type": "builds", "id": "b0", "attributes": {"version": "1200", "processingState": "VALID", "expired": true}}
+      ],
+      "included": [{"type": "preReleaseVersions", "id": "p1", "attributes": {"version": "3.22", "platform": "IOS"}}],
+      "links": {"next": "https://api.appstoreconnect.apple.com/v1/builds?cursor=x"}
+    }"#;
+    let (builds, next) = submission::parse_builds(body).unwrap();
+    assert!(next.is_some());
+    assert_eq!(
+        builds.iter().map(|b| b.label()).collect::<Vec<_>>(),
+        vec!["3.22 (1235)", "3.22 (1234)", "1200"]
+    );
+    assert_eq!(
+        builds.iter().map(|b| b.is_ready()).collect::<Vec<_>>(),
+        vec![false, true, false]
+    );
+    assert_eq!(builds[1].uses_non_exempt_encryption, Some(false));
+    assert_eq!(submission::parse_build(r#"{"data": null}"#).unwrap(), None);
+}
+
+#[test]
+fn parses_review_submissions_and_items() {
+    let body = r#"{"data": {"type": "reviewSubmissions", "id": "sub-1",
+        "attributes": {"platform": "IOS", "state": "WAITING_FOR_REVIEW", "submittedDate": "2026-10-29T12:00:00Z"}}}"#;
+    let document: Document<Resource<submission::ReviewSubmissionAttributes>> = serde_json::from_str(body).unwrap();
+    let submission = ReviewSubmission::from(document.data);
+    assert_eq!(submission.state, ReviewSubmissionState::WaitingForReview);
+    assert!(submission.state.can_cancel());
+    assert!(!ReviewSubmissionState::Complete.can_cancel());
+
+    let items = r#"{"data": [
+        {"type": "reviewSubmissionItems", "id": "i1", "attributes": {"state": "READY_FOR_REVIEW"},
+         "relationships": {"appStoreVersion": {"data": {"type": "appStoreVersions", "id": "ver-1"}}}},
+        {"type": "reviewSubmissionItems", "id": "i2", "relationships": {"appEvent": {"data": {"type": "appEvents", "id": "e1"}}}}
+    ]}"#;
+    assert_eq!(submission::parse_item_versions(items).unwrap(), vec!["ver-1"]);
+}
+
+#[test]
+fn build_upload_bodies_and_checksum() {
+    use serde_json::json;
+    let file = upload::BuildFile {
+        path: "Things.ipa".into(),
+        platform: Platform::Ios,
+        version: "3.22".into(),
+        build_number: "1234".into(),
+    };
+    assert_eq!(
+        upload::build_upload_body("904237743", &file)["data"]["attributes"],
+        json!({"cfBundleShortVersionString": "3.22", "cfBundleVersion": "1234", "platform": "IOS"})
+    );
+    assert_eq!(upload::uti_for(std::path::Path::new("A.IPA")).unwrap(), "com.apple.ipa");
+    assert_eq!(upload::uti_for(std::path::Path::new("A.pkg")).unwrap(), "com.apple.pkg");
+    assert!(upload::uti_for(std::path::Path::new("A.zip")).is_err());
+    assert_eq!(
+        upload::upload_file_body("u1", "Things.ipa", 42, "com.apple.ipa")["data"]["attributes"],
+        json!({"assetType": "ASSET", "fileName": "Things.ipa", "fileSize": 42, "uti": "com.apple.ipa"})
+    );
+
+    let path = std::env::temp_dir().join(format!("appdoctor-asc-{}.ipa", std::process::id()));
+    std::fs::write(&path, b"abc").unwrap();
+    assert_eq!(
+        upload::sha256_hex(&path).unwrap(),
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    );
+    let _ = std::fs::remove_file(&path);
+
+    let operations = r#"{"data": {"type": "buildUploadFiles", "id": "f1", "attributes": {"uploadOperations": [
+        {"method": "PUT", "url": "https://upload.example/part1", "offset": 0, "length": 10485760,
+         "requestHeaders": [{"name": "Content-Type", "value": "application/octet-stream"}]}]}}}"#;
+    let document: Document<Resource<upload::BuildUploadFileAttributes>> = serde_json::from_str(operations).unwrap();
+    assert_eq!(document.data.attributes.upload_operations()[0].length, 10_485_760);
 }
 
 #[test]

@@ -5,14 +5,16 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Context as _;
-use appdoctor_appstore::{ITunesClient, SearchSource, ThrottleConfig};
-use appdoctor_secrets::{Memory, Vault};
+use appdoctor_appstore::{ITunesClient, NativeSearch, SearchSource, ThrottleConfig};
+use appdoctor_secrets::{AscKey, Memory, Secret, Vault};
 use appdoctor_store::Store;
 
 pub struct Services {
     pub store: Store,
     pub vault: Vault,
     pub itunes: ITunesClient,
+    /// App Store–native rankings, falling back to `itunes`.
+    pub search: NativeSearch,
     pub data_dir: PathBuf,
     /// A random UUID made on first launch. Never derived from hardware.
     pub device_id: String,
@@ -47,10 +49,12 @@ impl Services {
         } else {
             Vault::os()
         };
+        let itunes = ITunesClient::new(ThrottleConfig::default());
         Ok(Arc::new(Self {
             store,
             vault,
-            itunes: ITunesClient::new(ThrottleConfig::default()),
+            search: NativeSearch::new(itunes.clone(), ThrottleConfig::default()),
+            itunes,
             data_dir,
             device_id,
         }))
@@ -58,7 +62,21 @@ impl Services {
 
     /// Where rank checks get search results. The seam for a better source.
     pub fn search_source(&self) -> &dyn SearchSource {
-        &self.itunes
+        &self.search
+    }
+
+    /// An App Store Connect client from the key in the keychain.
+    pub fn asc_client(&self) -> anyhow::Result<appdoctor_asc::Client> {
+        let key: AscKey = self
+            .vault
+            .get(Secret::AppStoreConnect)?
+            .context("add an App Store Connect key in Settings first")?;
+        let credentials = appdoctor_asc::Credentials::new(key.issuer_id, key.key_id, &key.private_key_pem)?;
+        Ok(appdoctor_asc::Client::new(credentials))
+    }
+
+    pub fn has_asc_key(&self) -> bool {
+        matches!(self.vault.get::<AscKey>(Secret::AppStoreConnect), Ok(Some(_)))
     }
 
     pub fn api_base(&self) -> String {

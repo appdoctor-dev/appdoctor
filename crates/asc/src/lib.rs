@@ -3,14 +3,24 @@
 //! Authenticates with an ES256 JWT signed locally from the user's own API
 //! key (`.p8` file, Issuer ID, Key ID); the key never leaves the machine.
 //!
-//! Scope is deliberately narrow: list apps, and read and write the metadata
-//! that ASO touches — app-info localizations (name, subtitle) and
-//! app-store-version localizations (keywords, promotional text, description,
-//! what's new). The client **never submits anything for review**: it has no
-//! method for it, and [`Client`] refuses any request to a review-submission
-//! resource, so tools built on it (the planned MCP server) can't either.
+//! What it covers:
+//! - Metadata ASO touches: app-info localizations (name, subtitle) and
+//!   app-store-version localizations (keywords, promotional text,
+//!   description, what's new).
+//! - Releasing: builds, attaching a build to an editable version, release
+//!   type, uploading a build ([`upload`]), and App Review submissions
+//!   ([`submission`]).
+//!
+//! Submitting for review is outward-facing and hard to undo, so it is never
+//! a side effect: [`Client::prepare_submission`] only reads and returns a
+//! [`SubmissionPlan`] to show the user, and [`Client::submit_for_review`]
+//! and [`Client::cancel_submission`] refuse to run unless the caller passes
+//! `confirmed: true` after showing that summary. The UI and the MCP tools
+//! both go through these two calls.
 
 mod model;
+pub mod submission;
+pub mod upload;
 
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -22,19 +32,13 @@ use serde::de::DeserializeOwned;
 use serde_json::json;
 
 pub use model::*;
+pub use submission::{ReleaseType, ReviewSubmission, ReviewSubmissionState, SubmissionPlan};
 
 const API_BASE: &str = "https://api.appstoreconnect.apple.com";
 const AUDIENCE: &str = "appstoreconnect-v1";
 /// Apple rejects tokens that live longer than 20 minutes.
 pub const MAX_TOKEN_LIFETIME: Duration = Duration::from_secs(20 * 60);
 const TOKEN_LIFETIME: Duration = Duration::from_secs(19 * 60);
-
-/// Resources that submit work to App Review. Never requested.
-const FORBIDDEN_PATHS: &[&str] = &[
-    "reviewSubmission",
-    "appStoreVersionSubmissions",
-    "betaAppReviewSubmissions",
-];
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -50,10 +54,18 @@ pub enum Error {
     Http(#[from] reqwest::Error),
     #[error("unexpected response: {0}")]
     Decode(#[from] serde_json::Error),
-    #[error("refusing to call {0}: AppDoctor never submits for review")]
-    ReviewSubmissionRefused(String),
+    #[error("not confirmed: show the user the submission summary and pass `confirmed: true`")]
+    NotConfirmed,
     #[error("no editable App Store version: create a new version in App Store Connect first")]
     NoEditableVersion,
+    #[error("the submission changed since it was confirmed: {0}")]
+    PlanOutdated(String),
+    #[error("build {0} isn't ready for review (processing state {1})")]
+    BuildNotReady(String, String),
+    #[error("couldn't read the build file: {0}")]
+    File(#[from] std::io::Error),
+    #[error("upload failed: {0}")]
+    Upload(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -136,9 +148,16 @@ impl Client {
         path_or_url: &str,
         body: Option<serde_json::Value>,
     ) -> Result<T> {
-        if let Some(path) = FORBIDDEN_PATHS.iter().find(|p| path_or_url.contains(*p)) {
-            return Err(Error::ReviewSubmissionRefused((*path).to_owned()));
-        }
+        let text = self.send(method, path_or_url, body).await?;
+        Ok(serde_json::from_str(&text)?)
+    }
+
+    /// For endpoints that answer `204 No Content`.
+    async fn request_empty(&self, method: Method, path: &str, body: Option<serde_json::Value>) -> Result<()> {
+        self.send(method, path, body).await.map(drop)
+    }
+
+    async fn send(&self, method: Method, path_or_url: &str, body: Option<serde_json::Value>) -> Result<String> {
         let url = if path_or_url.starts_with("http") {
             path_or_url.to_owned()
         } else {
@@ -157,7 +176,7 @@ impl Client {
         if !status.is_success() {
             return Err(api_error(status, &text));
         }
-        Ok(serde_json::from_str(&text)?)
+        Ok(text)
     }
 
     async fn get_all<A: DeserializeOwned>(&self, path: &str) -> Result<Vec<Resource<A>>> {

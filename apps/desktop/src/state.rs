@@ -28,6 +28,7 @@ pub enum Section {
     Competitors,
     Localization,
     Screenshots,
+    Release,
     Settings,
 }
 

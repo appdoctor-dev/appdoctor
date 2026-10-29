@@ -4,6 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::skip_none;
+use crate::submission::ReleaseType;
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct Document<T> {
@@ -150,6 +151,8 @@ pub(crate) struct AppStoreVersionAttributes {
     /// Current name; `appStoreState` is the deprecated spelling.
     app_version_state: Option<String>,
     app_store_state: Option<String>,
+    release_type: Option<ReleaseType>,
+    earliest_release_date: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -158,6 +161,8 @@ pub struct AppStoreVersion {
     pub platform: Option<Platform>,
     pub version: Option<String>,
     pub state: Option<String>,
+    pub release_type: Option<ReleaseType>,
+    pub earliest_release_date: Option<String>,
 }
 
 impl AppStoreVersion {
@@ -182,6 +187,8 @@ impl From<Resource<AppStoreVersionAttributes>> for AppStoreVersion {
             platform: a.platform,
             version: a.version_string,
             state: a.app_version_state.or(a.app_store_state),
+            release_type: a.release_type,
+            earliest_release_date: a.earliest_release_date,
         }
     }
 }

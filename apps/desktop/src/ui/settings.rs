@@ -581,7 +581,7 @@ impl SettingsView {
         };
         self.section(
             "App Store Connect",
-            "Lets AppDoctor read and write your app's name, subtitle, keywords and description. Create a key under Users and Access → Integrations → App Store Connect API (App Manager role). AppDoctor never submits anything for review.",
+            "Lets AppDoctor read and write your app's name, subtitle, keywords and description, and submit versions to App Review after you confirm a summary. Create a key under Users and Access → Integrations → App Store Connect API (App Manager role).",
             cx,
         )
         .when_some(self.asc_saved.clone(), |this, (_, key_id)| {

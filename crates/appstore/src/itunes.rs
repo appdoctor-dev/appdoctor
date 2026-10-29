@@ -7,7 +7,7 @@ use reqwest::{StatusCode, header};
 use serde::Deserialize;
 
 use crate::throttle::Attempt;
-use crate::{AppId, Error, Result, SearchSource, Throttle, ThrottleConfig};
+use crate::{AppId, Error, Result, SearchPage, SearchSource, Throttle, ThrottleConfig};
 
 const DEFAULT_BASE: &str = "https://itunes.apple.com";
 
@@ -105,6 +105,23 @@ impl ITunesClient {
         parse_search(&body)
     }
 
+    /// Search-hit details for many apps at once (up to 200 per request),
+    /// in no particular order.
+    pub async fn lookup_hits(&self, ids: &[AppId], country: &str) -> Result<Vec<SearchHit>> {
+        let url = format!("{}/lookup", self.base);
+        let mut hits = Vec::with_capacity(ids.len());
+        for batch in ids.chunks(200) {
+            let id_list = batch.iter().map(AppId::to_string).collect::<Vec<_>>().join(",");
+            let query = [
+                ("id", id_list),
+                ("country", country.to_ascii_lowercase()),
+                ("entity", "software".into()),
+            ];
+            hits.extend(parse_search(&self.get_json(&url, &query).await?)?);
+        }
+        Ok(hits)
+    }
+
     async fn get_json(&self, url: &str, query: &[(&str, String)]) -> Result<String> {
         self.throttle
             .run(|| async {
@@ -137,12 +154,16 @@ impl ITunesClient {
 }
 
 impl SearchSource for ITunesClient {
-    fn search<'a>(&'a self, term: &'a str, country: &'a str, limit: usize) -> BoxFuture<'a, Result<Vec<SearchHit>>> {
-        ITunesClient::search(self, term, country, limit).boxed()
-    }
-
-    fn name(&self) -> &'static str {
-        "itunes-search"
+    fn search<'a>(&'a self, term: &'a str, country: &'a str, limit: usize) -> BoxFuture<'a, Result<SearchPage>> {
+        async move {
+            let hits = ITunesClient::search(self, term, country, limit).await?;
+            Ok(SearchPage {
+                ranked: hits.iter().map(|hit| hit.id).collect(),
+                top: hits,
+                source: crate::ITUNES_SOURCE,
+            })
+        }
+        .boxed()
     }
 }
 

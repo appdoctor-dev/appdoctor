@@ -340,7 +340,7 @@ impl KeywordsView {
                     this.child(
                         div()
                             .text_color(muted)
-                            .child("Ranks from the iTunes Search API, checked from this Mac"),
+                            .child("Ranks from App Store search (iPhone), checked from this Mac"),
                     )
                 } else {
                     this.child(

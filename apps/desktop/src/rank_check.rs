@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use appdoctor_appstore::{AppId, SearchHit, rank_of};
+use appdoctor_appstore::{AppId, SearchHit};
 use appdoctor_scoring::RankedApp;
 use appdoctor_secrets::{AppleAdsKey, Secret};
 use appdoctor_store::{KeywordRow, Popularity, Snapshot, TopApp};
@@ -16,8 +16,9 @@ use futures::channel::mpsc::UnboundedSender;
 
 use crate::services::Services;
 
-/// How deep to look for the app. The iTunes Search API stops at 200.
-const SEARCH_DEPTH: usize = 200;
+/// How deep to look for the app. The App Store's own search returns about
+/// 250 results; the iTunes Search fallback stops at 200.
+const SEARCH_DEPTH: usize = 250;
 const TOP_APPS_KEPT: usize = 10;
 const CONCURRENCY: usize = 8;
 
@@ -93,18 +94,21 @@ pub async fn run(
 }
 
 async fn check_one(services: &Services, app_id: u64, keyword: &KeywordRow, checked_at: i64) -> anyhow::Result<()> {
-    let source = services.search_source();
-    let hits = source.search(&keyword.term, &keyword.country, SEARCH_DEPTH).await?;
-    let rank = rank_of(AppId(app_id), &hits);
-    let difficulty = appdoctor_scoring::difficulty(&keyword.term, &top_ranked(&hits));
+    let page = services
+        .search_source()
+        .search(&keyword.term, &keyword.country, SEARCH_DEPTH)
+        .await?;
+    let rank = page.rank_of(AppId(app_id));
+    let difficulty = appdoctor_scoring::difficulty(&keyword.term, &top_ranked(&page.top));
     services.store.record_snapshot(&Snapshot {
         keyword_id: keyword.id,
         checked_at,
         rank,
-        results_count: hits.len() as u32,
+        results_count: page.ranked.len() as u32,
         difficulty: Some(difficulty.score),
-        source: source.name().into(),
-        top_apps: hits
+        source: page.source.into(),
+        top_apps: page
+            .top
             .iter()
             .take(TOP_APPS_KEPT)
             .map(|hit| TopApp {

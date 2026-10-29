@@ -4,6 +4,7 @@ mod apps;
 mod coming_soon;
 mod keyword_table;
 mod keywords;
+mod release;
 mod settings;
 mod shell;
 mod widgets;

@@ -50,7 +50,7 @@ pub struct AppRecord {
 }
 
 /// A keyword row as the keyword table shows it: the keyword plus its latest
-/// and previous rank checks.
+/// rank check and the one before it from the same search source.
 #[derive(Debug, Clone, PartialEq)]
 pub struct KeywordRow {
     pub id: KeywordId,
@@ -288,9 +288,11 @@ impl Store {
         let conn = self.conn();
         let mut statement = conn.prepare_cached(
             "WITH ranked AS (
-                SELECT s.keyword_id, s.rank, s.checked_at, s.difficulty, s.results_count, s.top_apps,
+                SELECT s.keyword_id, s.rank, s.checked_at, s.difficulty, s.results_count, s.top_apps, s.source,
                        ROW_NUMBER() OVER (PARTITION BY s.keyword_id
-                                          ORDER BY s.checked_at DESC, s.id DESC) AS rn
+                                          ORDER BY s.checked_at DESC, s.id DESC) AS rn,
+                       ROW_NUMBER() OVER (PARTITION BY s.keyword_id, s.source
+                                          ORDER BY s.checked_at DESC, s.id DESC) AS rn_source
                 FROM rank_snapshots s JOIN keywords k ON k.id = s.keyword_id
                 WHERE k.app_id = ?1
              )
@@ -300,7 +302,9 @@ impl Store {
                     p.popularity, cur.top_apps
              FROM keywords k
              LEFT JOIN ranked cur ON cur.keyword_id = k.id AND cur.rn = 1
-             LEFT JOIN ranked prev ON prev.keyword_id = k.id AND prev.rn = 2
+             -- The previous check from the same source: ranks from different
+             -- sources aren't one series.
+             LEFT JOIN ranked prev ON prev.keyword_id = k.id AND prev.source = cur.source AND prev.rn_source = 2
              LEFT JOIN popularity_cache p ON p.term = k.term AND p.country = k.country
              WHERE k.app_id = ?1
              ORDER BY k.term, k.country",
