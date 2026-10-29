@@ -30,6 +30,7 @@ fn snapshot(keyword_id: KeywordId, checked_at: i64, rank: Option<u32>) -> Snapsh
                 icon_url: None,
             })
             .collect(),
+        ranked_ids: vec![1, 2, 3],
     }
 }
 
@@ -202,4 +203,31 @@ fn change_compares_only_checks_from_the_same_source() {
     native.rank = Some(120);
     store.record_snapshot(&native).unwrap();
     assert_eq!(store.keywords(1).unwrap()[0].change(), RankChange::Entered);
+}
+
+#[test]
+fn full_rankings_give_any_apps_rank() {
+    let store = Store::open_in_memory().unwrap();
+    store.upsert_app(&app(1)).unwrap();
+    let id = store.add_keyword(1, "habit", "us", 1).unwrap();
+    let mut older = snapshot(id, 10, Some(3));
+    older.ranked_ids = vec![9, 8, 1];
+    store.record_snapshot(&older).unwrap();
+    let mut newer = snapshot(id, 20, Some(2));
+    newer.ranked_ids = vec![9, 1, 7, 8];
+    store.record_snapshot(&newer).unwrap();
+    store.add_keyword(1, "other storefront", "gb", 1).unwrap();
+
+    let latest = store.latest_rankings(1, "us").unwrap();
+    assert_eq!(latest.len(), 1);
+    let snapshot = &latest[&id];
+    assert_eq!(snapshot.checked_at, 20);
+    assert_eq!(snapshot.rank_of(8), Some(4));
+    assert_eq!(snapshot.rank_of(1), Some(2));
+    assert_eq!(snapshot.rank_of(42), None);
+
+    let history = store.app_history(1, "US").unwrap();
+    assert_eq!(history.iter().map(|s| s.checked_at).collect::<Vec<_>>(), vec![10, 20]);
+    assert!(history[0].ranked_ids.is_empty(), "history skips the heavy lists");
+    assert_eq!(store.rank_history(id, 1).unwrap()[0].ranked_ids, vec![9, 1, 7, 8]);
 }

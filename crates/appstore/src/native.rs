@@ -30,6 +30,8 @@ pub const ITUNES_SOURCE: &str = "itunes-search";
 const DETAILED: usize = 10;
 
 const SEARCH_URL: &str = "https://search.itunes.apple.com/WebObjects/MZStore.woa/wa/search";
+/// The App Store's search suggestions: what people type, most popular first.
+const HINTS_URL: &str = "https://search.itunes.apple.com/WebObjects/MZSearchHints.woa/wa/hints";
 /// The App Store's own requests look like a browser; a bare client UA gets
 /// a different (web) response shape.
 const USER_AGENT: &str =
@@ -184,6 +186,30 @@ struct BubbleResult {
     id: Value,
 }
 
+/// The `term` values of a hints plist, in order.
+pub(crate) fn parse_hints(xml: &str) -> Vec<String> {
+    let mut terms = Vec::new();
+    let mut rest = xml;
+    while let Some(at) = rest.find("<key>term</key>") {
+        rest = &rest[at + "<key>term</key>".len()..];
+        let Some(start) = rest.find("<string>") else { break };
+        let after = &rest[start + "<string>".len()..];
+        let Some(end) = after.find("</string>") else { break };
+        terms.push(unescape_xml(&after[..end]));
+        rest = &after[end..];
+    }
+    terms
+}
+
+fn unescape_xml(text: &str) -> String {
+    text.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&#39;", "'")
+        .replace("&amp;", "&")
+}
+
 /// Ranked app IDs from an MZStore search response, deduplicated, best first.
 /// An unrecognised shape is an error, so callers fall back rather than
 /// reporting every app as unranked.
@@ -275,6 +301,42 @@ impl NativeSearch {
         parse_ranked_ids(&body)
     }
 
+    /// App Store search suggestions for a prefix, most popular first. Empty
+    /// for storefronts without a known ID.
+    pub async fn hints(&self, term: &str, country: &str) -> Result<Vec<String>> {
+        let Some(storefront) = storefront_id(country) else {
+            return Ok(Vec::new());
+        };
+        let store_front = if storefront == 143441 {
+            "143441-1,29".to_owned()
+        } else {
+            format!("{storefront},29")
+        };
+        let body = self
+            .throttle
+            .run(|| async {
+                let request = self
+                    .http
+                    .get(HINTS_URL)
+                    .query(&[("clientApplication", "Software"), ("term", term)])
+                    .header(header::ACCEPT, "text/xml,application/xml;q=0.9,*/*;q=0.8")
+                    .header("X-Apple-Store-Front", &store_front);
+                match request.send().await {
+                    Ok(response) if response.status().is_success() => match response.text().await {
+                        Ok(body) => Attempt::Done(body),
+                        Err(error) => Attempt::Transient(error.into()),
+                    },
+                    Ok(response) if response.status() == StatusCode::TOO_MANY_REQUESTS => {
+                        Attempt::Throttled { retry_after: None }
+                    }
+                    Ok(response) => Attempt::Fatal(Error::Status(response.status().as_u16())),
+                    Err(error) => Attempt::Transient(error.into()),
+                }
+            })
+            .await?;
+        Ok(parse_hints(&body))
+    }
+
     async fn native(&self, term: &str, country: &str, storefront: u32, limit: usize) -> Result<SearchPage> {
         let mut ranked = self.ranked_ids(term, storefront).await?;
         ranked.truncate(limit);
@@ -349,6 +411,18 @@ mod tests {
         let ranked = [AppId(3), AppId(1), AppId(2), AppId(9)];
         let ordered = in_rank_order(&ranked, vec![hit(1), hit(2), hit(3)]);
         assert_eq!(ordered.iter().map(|h| h.id.0).collect::<Vec<_>>(), vec![3, 1, 2]);
+    }
+
+    #[test]
+    fn parses_search_hints() {
+        let xml = r#"<?xml version="1.0"?><plist version="1.0"><dict>
+            <key>title</key><string>Suggestions</string>
+            <key>hints</key><array>
+              <dict><key>term</key><string>task rabbit</string><key>url</key><string>https://x?a=1&amp;b=2</string></dict>
+              <dict><key>term</key><string>notes &amp; tasks</string><key>url</key><string>u</string></dict>
+            </array></dict></plist>"#;
+        assert_eq!(parse_hints(xml), vec!["task rabbit", "notes & tasks"]);
+        assert!(parse_hints("<plist/>").is_empty());
     }
 
     #[test]

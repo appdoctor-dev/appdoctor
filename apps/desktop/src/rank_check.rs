@@ -117,6 +117,7 @@ async fn check_one(services: &Services, app_id: u64, keyword: &KeywordRow, check
                 icon_url: hit.icon_url.clone(),
             })
             .collect(),
+        ranked_ids: page.ranked.iter().map(|id| id.0).collect(),
     })?;
     Ok(())
 }

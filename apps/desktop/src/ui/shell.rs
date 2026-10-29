@@ -10,7 +10,10 @@ use crate::state::{AppState, Section, UpdateStatus};
 use crate::theme::{self, meter};
 use crate::ui::apps::AppsView;
 use crate::ui::coming_soon;
+use crate::ui::competitors::CompetitorsView;
 use crate::ui::keywords::KeywordsView;
+use crate::ui::localization::LocalizationView;
+use crate::ui::rankings::RankingsView;
 use crate::ui::release::ReleaseView;
 use crate::ui::settings::SettingsView;
 use crate::ui::widgets::{app_icon, flag, status_dot};
@@ -22,6 +25,9 @@ pub struct Shell {
     keywords: Entity<KeywordsView>,
     apps: Entity<AppsView>,
     release: Entity<ReleaseView>,
+    rankings: Entity<RankingsView>,
+    competitors: Entity<CompetitorsView>,
+    localization: Entity<LocalizationView>,
     settings: Entity<SettingsView>,
     _subscriptions: Vec<Subscription>,
 }
@@ -31,6 +37,9 @@ impl Shell {
         let keywords = cx.new(|cx| KeywordsView::new(state.clone(), window, cx));
         let apps = cx.new(|cx| AppsView::new(state.clone(), window, cx));
         let release = cx.new(|cx| ReleaseView::new(state.clone(), cx));
+        let rankings = cx.new(|cx| RankingsView::new(state.clone(), cx));
+        let competitors = cx.new(|cx| CompetitorsView::new(state.clone(), window, cx));
+        let localization = cx.new(|cx| LocalizationView::new(state.clone(), window, cx));
         let settings = cx.new(|cx| SettingsView::new(state.clone(), window, cx));
         let subscriptions = vec![
             cx.observe(&state, |_, _, cx| cx.notify()),
@@ -41,6 +50,9 @@ impl Shell {
             keywords,
             apps,
             release,
+            rankings,
+            competitors,
+            localization,
             settings,
             _subscriptions: subscriptions,
         }
@@ -362,6 +374,9 @@ impl Render for Shell {
             Section::Keywords => self.keywords.clone().into_any_element(),
             Section::Apps => self.apps.clone().into_any_element(),
             Section::Release => self.release.clone().into_any_element(),
+            Section::Rankings => self.rankings.clone().into_any_element(),
+            Section::Competitors => self.competitors.clone().into_any_element(),
+            Section::Localization => self.localization.clone().into_any_element(),
             Section::Settings => self.settings.clone().into_any_element(),
             other => coming_soon::render(other, cx),
         };

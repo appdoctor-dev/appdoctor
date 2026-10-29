@@ -28,6 +28,7 @@ pub struct AppDetails {
     pub rating_count: u64,
     pub average_rating: f32,
     pub price: Option<String>,
+    pub description: Option<String>,
 }
 
 /// One search result, in rank order.
@@ -211,6 +212,7 @@ struct RawApp {
     user_rating_count: Option<u64>,
     average_user_rating: Option<f32>,
     formatted_price: Option<String>,
+    description: Option<String>,
 }
 
 impl RawApp {
@@ -256,6 +258,7 @@ pub(crate) fn parse_lookup(body: &str) -> Result<Vec<AppDetails>> {
             rating_count: raw.user_rating_count.unwrap_or(0),
             average_rating: raw.average_user_rating.unwrap_or(0.0),
             price: raw.formatted_price,
+            description: raw.description,
         })
         .collect())
 }
@@ -325,6 +328,7 @@ mod tests {
         assert_eq!(app.rating_count, 31337);
         assert!((app.average_rating - 4.79).abs() < 1e-6);
         assert_eq!(app.genre.as_deref(), Some("Productivity"));
+        assert_eq!(app.description.as_deref(), Some("Get things done."));
     }
 
     #[test]

@@ -253,6 +253,7 @@ dependencies = [
  "appdoctor-scoring",
  "appdoctor-secrets",
  "appdoctor-store",
+ "chrono",
  "dirs 7.0.0",
  "futures",
  "gpui-kit",

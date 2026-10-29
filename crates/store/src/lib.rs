@@ -12,6 +12,7 @@
 
 mod migrations;
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
@@ -136,6 +137,16 @@ pub struct Snapshot {
     pub source: String,
     /// The top results, best first, for the keyword table and competitor tracking.
     pub top_apps: Vec<TopApp>,
+    /// Every result's app ID in rank order. Empty when loaded by queries
+    /// that don't need it.
+    pub ranked_ids: Vec<u64>,
+}
+
+impl Snapshot {
+    /// Where `app` ranked in this check, if `ranked_ids` was loaded.
+    pub fn rank_of(&self, app: u64) -> Option<u32> {
+        self.ranked_ids.iter().position(|id| *id == app).map(|ix| ix as u32 + 1)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -344,10 +355,16 @@ impl Store {
 
     pub fn record_snapshot(&self, snapshot: &Snapshot) -> Result<()> {
         let top = serde_json::to_string(&snapshot.top_apps).unwrap_or_else(|_| "[]".into());
+        let ranked = snapshot
+            .ranked_ids
+            .iter()
+            .map(u64::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
         self.conn().execute(
             "INSERT INTO rank_snapshots (keyword_id, checked_at, rank, results_count, difficulty,
-                                         source, top_apps)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                                         source, top_apps, ranked_ids)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 snapshot.keyword_id,
                 snapshot.checked_at,
@@ -356,6 +373,7 @@ impl Store {
                 snapshot.difficulty.map(f64::from),
                 snapshot.source,
                 top,
+                ranked,
             ],
         )?;
         Ok(())
@@ -364,24 +382,44 @@ impl Store {
     /// A keyword's checks, newest first.
     pub fn rank_history(&self, keyword_id: KeywordId, limit: usize) -> Result<Vec<Snapshot>> {
         let conn = self.conn();
-        let mut statement = conn.prepare(
-            "SELECT keyword_id, checked_at, rank, results_count, difficulty, source, top_apps
-             FROM rank_snapshots WHERE keyword_id = ?1
-             ORDER BY checked_at DESC, id DESC LIMIT ?2",
-        )?;
-        let rows = statement.query_map(params![keyword_id, limit as i64], |row| {
-            let top: String = row.get(6)?;
-            Ok(Snapshot {
-                keyword_id: row.get(0)?,
-                checked_at: row.get(1)?,
-                rank: row.get::<_, Option<i64>>(2)?.map(|rank| rank as u32),
-                results_count: row.get(3)?,
-                difficulty: row.get::<_, Option<f64>>(4)?.map(|d| d as f32),
-                source: row.get(5)?,
-                top_apps: serde_json::from_str(&top).unwrap_or_default(),
-            })
-        })?;
+        let mut statement = conn.prepare(&format!(
+            "SELECT {SNAPSHOT_COLUMNS} FROM rank_snapshots s
+             WHERE s.keyword_id = ?1 ORDER BY s.checked_at DESC, s.id DESC LIMIT ?2"
+        ))?;
+        let rows = statement.query_map(params![keyword_id, limit as i64], snapshot_from_row)?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Every check of an app's keywords in one storefront, oldest first,
+    /// without the full result lists (for history charts).
+    pub fn app_history(&self, app_id: u64, country: &str) -> Result<Vec<Snapshot>> {
+        let conn = self.conn();
+        let mut statement = conn.prepare(
+            "SELECT s.keyword_id, s.checked_at, s.rank, s.results_count, s.difficulty, s.source,
+                    s.top_apps, ''
+             FROM rank_snapshots s JOIN keywords k ON k.id = s.keyword_id
+             WHERE k.app_id = ?1 AND k.country = ?2
+             ORDER BY s.checked_at, s.id",
+        )?;
+        let rows = statement.query_map(params![app_id as i64, country.to_ascii_lowercase()], snapshot_from_row)?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Each keyword's latest check with its full result list, for reading
+    /// other apps' ranks (competitors) from checks already made.
+    pub fn latest_rankings(&self, app_id: u64, country: &str) -> Result<HashMap<KeywordId, Snapshot>> {
+        let conn = self.conn();
+        let mut statement = conn.prepare(&format!(
+            "SELECT {SNAPSHOT_COLUMNS} FROM rank_snapshots s
+             JOIN keywords k ON k.id = s.keyword_id
+             WHERE k.app_id = ?1 AND k.country = ?2
+               AND s.id = (SELECT s2.id FROM rank_snapshots s2 WHERE s2.keyword_id = s.keyword_id
+                           ORDER BY s2.checked_at DESC, s2.id DESC LIMIT 1)"
+        ))?;
+        let rows = statement.query_map(params![app_id as i64, country.to_ascii_lowercase()], snapshot_from_row)?;
+        rows.map(|row| row.map(|snapshot| (snapshot.keyword_id, snapshot)))
+            .collect::<rusqlite::Result<_>>()
+            .map_err(Error::from)
     }
 
     // Popularity
@@ -443,6 +481,14 @@ impl Store {
         Ok(())
     }
 
+    pub fn delete_competitor(&self, app_id: u64, competitor_id: u64) -> Result<()> {
+        self.conn().execute(
+            "DELETE FROM competitors WHERE app_id = ?1 AND competitor_id = ?2",
+            params![app_id as i64, competitor_id as i64],
+        )?;
+        Ok(())
+    }
+
     pub fn competitors(&self, app_id: u64) -> Result<Vec<Competitor>> {
         let conn = self.conn();
         let mut statement = conn.prepare(
@@ -483,6 +529,24 @@ impl Store {
 /// The form keywords are stored and compared in.
 pub fn normalize_term(term: &str) -> String {
     term.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
+}
+
+const SNAPSHOT_COLUMNS: &str =
+    "s.keyword_id, s.checked_at, s.rank, s.results_count, s.difficulty, s.source, s.top_apps, s.ranked_ids";
+
+fn snapshot_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Snapshot> {
+    let top: String = row.get(6)?;
+    let ranked: String = row.get(7)?;
+    Ok(Snapshot {
+        keyword_id: row.get(0)?,
+        checked_at: row.get(1)?,
+        rank: row.get::<_, Option<i64>>(2)?.map(|rank| rank as u32),
+        results_count: row.get(3)?,
+        difficulty: row.get::<_, Option<f64>>(4)?.map(|d| d as f32),
+        source: row.get(5)?,
+        top_apps: serde_json::from_str(&top).unwrap_or_default(),
+        ranked_ids: ranked.split(',').filter_map(|id| id.parse().ok()).collect(),
+    })
 }
 
 fn app_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AppRecord> {

@@ -154,6 +154,20 @@ pub fn pill(text: impl Into<SharedString>, color: Hsla) -> impl IntoElement {
         .child(text.into())
 }
 
+/// "▲ 3" in green, "▼ 2" in red, "New", "Out", "=", "—".
+pub fn change_label(change: appdoctor_store::RankChange, cx: &App) -> (String, Hsla) {
+    use appdoctor_store::RankChange;
+    let muted = cx.theme().muted_foreground;
+    match change {
+        RankChange::Up(n) => (format!("▲ {n}"), crate::theme::meter::up()),
+        RankChange::Down(n) => (format!("▼ {n}"), crate::theme::meter::down()),
+        RankChange::Entered => ("New".into(), crate::theme::meter::up()),
+        RankChange::Dropped => ("Out".into(), crate::theme::meter::down()),
+        RankChange::Same => ("=".into(), muted),
+        RankChange::First | RankChange::Unchecked => ("—".into(), muted),
+    }
+}
+
 pub fn status_dot(color: Hsla) -> impl IntoElement {
     div().size(px(7.)).rounded_full().bg(color).flex_shrink_0()
 }

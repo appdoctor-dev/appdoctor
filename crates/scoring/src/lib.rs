@@ -16,6 +16,10 @@
 //! Higher positions weigh more, and an empty slot (fewer than ten results)
 //! counts as zero, so a sparse search scores as easy.
 
+mod candidates;
+
+pub use candidates::candidates;
+
 /// How many top results the score looks at.
 pub const TOP_N: usize = 10;
 

@@ -61,6 +61,9 @@ const MIGRATIONS: &[&str] = &[
         key    TEXT PRIMARY KEY,
         value  TEXT NOT NULL
     );",
+    // 2: the full result order per check (comma-separated app IDs), so any
+    // app's rank (a competitor's) can be read from checks already made.
+    "ALTER TABLE rank_snapshots ADD COLUMN ranked_ids TEXT NOT NULL DEFAULT '';",
 ];
 
 pub(crate) fn run(conn: &mut Connection) -> rusqlite::Result<()> {

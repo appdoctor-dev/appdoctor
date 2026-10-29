@@ -272,15 +272,7 @@ impl TableDelegate for KeywordTable {
 }
 
 fn render_change(change: RankChange, cx: &App) -> AnyElement {
-    let muted = cx.theme().muted_foreground;
-    let (text, color) = match change {
-        RankChange::Up(n) => (format!("▲ {n}"), meter::up()),
-        RankChange::Down(n) => (format!("▼ {n}"), meter::down()),
-        RankChange::Entered => ("New".into(), meter::up()),
-        RankChange::Dropped => ("Out".into(), meter::down()),
-        RankChange::Same => ("=".into(), muted),
-        RankChange::First | RankChange::Unchecked => ("—".into(), muted),
-    };
+    let (text, color) = widgets::change_label(change, cx);
     div()
         .text_sm()
         .font_weight(FontWeight::MEDIUM)

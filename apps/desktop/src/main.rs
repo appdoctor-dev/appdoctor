@@ -6,6 +6,7 @@
 //! traps in Cap's desktop-gpui README).
 
 mod assets;
+mod discover;
 mod entitlement;
 mod icons;
 mod rank_check;
