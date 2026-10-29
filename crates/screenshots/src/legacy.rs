@@ -1,0 +1,85 @@
+//! Reading saved designs, including the first format (a fixed headline,
+//! subheadline and device per slide), which converts to layers.
+
+use serde::Deserialize;
+
+use crate::{BASE_HEIGHT, BASE_WIDTH, Background, DEVICE_ASPECT, Design, Frame, Layer, LayerKind, Slide};
+
+#[derive(Deserialize)]
+struct Current {
+    slides: Vec<Slide>,
+}
+
+#[derive(Deserialize)]
+struct V1 {
+    slides: Vec<V1Slide>,
+}
+
+#[derive(Deserialize)]
+struct V1Slide {
+    background: Background,
+    headline: V1Caption,
+    subheadline: V1Caption,
+    device: V1Device,
+}
+
+#[derive(Deserialize)]
+struct V1Caption {
+    text: String,
+    color: String,
+    size: f32,
+    weight: u16,
+}
+
+#[derive(Deserialize)]
+struct V1Device {
+    frame: Frame,
+    scale: f32,
+    offset: f32,
+    screenshot: Option<String>,
+}
+
+pub(crate) fn parse(bytes: &[u8]) -> Option<Design> {
+    if let Ok(current) = serde_json::from_slice::<Current>(bytes) {
+        return Some(Design {
+            version: 2,
+            slides: current.slides,
+        });
+    }
+    let v1: V1 = serde_json::from_slice(bytes).ok()?;
+    let mut next_id = 0;
+    let slides = v1
+        .slides
+        .into_iter()
+        .map(|slide| {
+            let mut id = || {
+                next_id += 1;
+                next_id
+            };
+            let headline = caption(id(), &slide.headline, 215.);
+            let subheadline = caption(id(), &slide.subheadline, headline.y + headline.height + 20.);
+            let width = BASE_WIDTH * 0.78 * slide.device.scale.clamp(0.5, 1.1);
+            let mut device = Layer::device(
+                id(),
+                subheadline.y + subheadline.height + 86. + slide.device.offset * BASE_HEIGHT,
+            );
+            device.width = width;
+            device.height = width * DEVICE_ASPECT;
+            device.x = (BASE_WIDTH - width) / 2.;
+            device.kind = LayerKind::Device {
+                frame: slide.device.frame,
+                screenshot: slide.device.screenshot,
+                shadow: true,
+            };
+            Slide {
+                background: slide.background,
+                layers: vec![headline, subheadline, device],
+            }
+        })
+        .collect();
+    Some(Design { version: 2, slides })
+}
+
+fn caption(id: u64, caption: &V1Caption, y: f32) -> Layer {
+    Layer::text(id, &caption.text, y, caption.size, caption.weight, &caption.color)
+}

@@ -1,10 +1,20 @@
 //! App Store screenshot designs.
 //!
-//! A [`Design`] is a list of [`Slide`]s: a background, a headline and
-//! subheadline, and a device frame holding one of the app's screenshots.
-//! [`to_svg`] lays a slide out for a canvas size; [`render_png`] rasterises
-//! it with resvg. The designer's live preview and the export both go
-//! through `render_png`, so what the user sees is what they upload.
+//! A [`Design`] is a list of [`Slide`]s; each slide is a background and a
+//! stack of positioned [`Layer`]s (text, device, image, shape) in canvas
+//! pixels on the 1320 × 2868 base canvas.
+//!
+//! Slides sit edge to edge, so a layer hanging off one slide continues on
+//! its neighbour ([`visible_layers`]): panoramic sets need no copies.
+//!
+//! The layout rules the editor draws with live are here too: [`device_geometry`]
+//! for the phone frame and [`wrap`] for text lines. [`to_svg`] and
+//! [`render_png`] use the same functions for export, so the canvas and the
+//! exported PNGs agree.
+
+pub mod edit;
+mod legacy;
+mod svg;
 
 use std::path::Path;
 use std::sync::{Arc, OnceLock};
@@ -12,6 +22,8 @@ use std::sync::{Arc, OnceLock};
 use resvg::tiny_skia;
 use resvg::usvg;
 use serde::{Deserialize, Serialize};
+
+pub use svg::to_svg;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -25,11 +37,14 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// App Store screenshot sizes (portrait).
+/// The canvas layers are positioned on.
+pub const BASE_WIDTH: f32 = 1320.;
+pub const BASE_HEIGHT: f32 = 2868.;
+
+/// App Store screenshot sizes (portrait). Layers scale uniformly by width.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CanvasSize {
-    /// 6.9" iPhone (iPhone 16 Pro Max class), 1320 × 2868. Apple's
-    /// required size for new submissions.
+    /// 6.9" iPhone, 1320 × 2868: Apple's required size for new submissions.
     Iphone69,
     /// 6.5" iPhone, 1242 × 2688.
     Iphone65,
@@ -60,42 +75,26 @@ impl CanvasSize {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Design {
+    pub version: u32,
     pub slides: Vec<Slide>,
+}
+
+impl Default for Design {
+    fn default() -> Self {
+        Self {
+            version: 2,
+            slides: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Slide {
     pub background: Background,
-    pub headline: Caption,
-    pub subheadline: Caption,
-    pub device: Device,
-}
-
-impl Default for Slide {
-    fn default() -> Self {
-        Self {
-            background: Background::Gradient {
-                from: "#4f46e5".into(),
-                to: "#9333ea".into(),
-                angle: 160.,
-            },
-            headline: Caption {
-                text: "Your headline here".into(),
-                color: "#ffffff".into(),
-                size: 104.,
-                weight: 700,
-            },
-            subheadline: Caption {
-                text: "One line on why it matters".into(),
-                color: "#e0e7ff".into(),
-                size: 54.,
-                weight: 400,
-            },
-            device: Device::default(),
-        }
-    }
+    /// Bottom to top.
+    pub layers: Vec<Layer>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -113,12 +112,59 @@ pub enum Background {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Caption {
-    pub text: String,
-    pub color: String,
-    /// Font size in pixels on the 1320-wide canvas; scaled for other sizes.
-    pub size: f32,
-    pub weight: u16,
+pub struct Layer {
+    pub id: u64,
+    pub name: String,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    #[serde(default = "one")]
+    pub opacity: f32,
+    #[serde(default)]
+    pub hidden: bool,
+    #[serde(default)]
+    pub locked: bool,
+    pub kind: LayerKind,
+}
+
+fn one() -> f32 {
+    1.
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum LayerKind {
+    Text {
+        text: String,
+        size: f32,
+        weight: u16,
+        color: String,
+        align: Align,
+    },
+    Device {
+        frame: Frame,
+        /// File name inside the design's folder.
+        screenshot: Option<String>,
+        shadow: bool,
+    },
+    Image {
+        file: Option<String>,
+        radius: f32,
+        shadow: bool,
+    },
+    Shape {
+        fill: String,
+        radius: f32,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Align {
+    Left,
+    Center,
+    Right,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -126,190 +172,237 @@ pub struct Caption {
 pub enum Frame {
     Black,
     Silver,
-    /// The screenshot with rounded corners and no bezel.
+    /// The screenshot with rounded corners, no bezel.
     None,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Device {
-    pub frame: Frame,
-    /// Device width as a share of the canvas width at 1.0; 0.5–1.1.
-    pub scale: f32,
-    /// Extra vertical shift as a share of canvas height (negative moves up).
-    pub offset: f32,
-    /// File name of the screenshot inside the design's folder.
-    pub screenshot: Option<String>,
-}
-
-impl Default for Device {
-    fn default() -> Self {
-        Self {
-            frame: Frame::Black,
-            scale: 1.,
-            offset: 0.,
-            screenshot: None,
+impl Frame {
+    pub fn bezel_color(self) -> Option<&'static str> {
+        match self {
+            Frame::Black => Some("#111114"),
+            Frame::Silver => Some("#d9dadf"),
+            Frame::None => None,
         }
     }
 }
 
-/// The base canvas width designs are authored at.
-const BASE_WIDTH: f32 = 1320.;
-/// iPhone screens are about 19.5:9.
-const DEVICE_ASPECT: f32 = 2.167;
-const FONT_FAMILY: &str = "Helvetica Neue, Segoe UI, Arial, sans-serif";
+/// iPhone screens are about 19.5:9; device layers keep this aspect.
+pub const DEVICE_ASPECT: f32 = 2.167;
+pub const LINE_HEIGHT: f32 = 1.16;
+pub const FONT_FAMILY: &str = "Helvetica Neue";
+const SVG_FONT_FAMILY: &str = "Helvetica Neue, Segoe UI, Arial, sans-serif";
 
-/// The slide as SVG for `size`. Screenshot `href`s are file names, resolved
-/// against the design's folder when rendering.
-pub fn to_svg(slide: &Slide, size: CanvasSize) -> String {
-    let (w, h) = size.pixels();
-    let (w, h) = (w as f32, h as f32);
-    let k = w / BASE_WIDTH;
-    let mut svg = String::with_capacity(4096);
-    svg.push_str(&format!(
-        r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="{w}" height="{h}" viewBox="0 0 {w} {h}"><defs>"#
-    ));
-
-    // Background.
-    let fill = match &slide.background {
-        Background::Solid { color } => color_attr(color),
-        Background::Gradient { from, to, angle } => {
-            let (x1, y1, x2, y2) = gradient_vector(*angle);
-            svg.push_str(&format!(
-                r#"<linearGradient id="bg" x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}"><stop offset="0" stop-color="{}"/><stop offset="1" stop-color="{}"/></linearGradient>"#,
-                color_attr(from),
-                color_attr(to)
-            ));
-            "url(#bg)".into()
+impl Layer {
+    pub fn label(&self) -> &'static str {
+        match self.kind {
+            LayerKind::Text { .. } => "Text",
+            LayerKind::Device { .. } => "Device",
+            LayerKind::Image { .. } => "Image",
+            LayerKind::Shape { .. } => "Shape",
         }
-    };
-
-    // Text block from the top.
-    let margin_x = w * 0.07;
-    let text_width = w - margin_x * 2.;
-    let mut y = h * 0.075;
-    let mut text = String::new();
-    for caption in [&slide.headline, &slide.subheadline] {
-        let font_size = caption.size * k;
-        let line_height = font_size * 1.16;
-        let lines = wrap(&caption.text, font_size, text_width);
-        if lines.is_empty() {
-            continue;
-        }
-        y += font_size;
-        for (i, line) in lines.iter().enumerate() {
-            text.push_str(&format!(
-                r#"<text x="{}" y="{}" font-family="{FONT_FAMILY}" font-size="{font_size}" font-weight="{}" fill="{}" text-anchor="middle">{}</text>"#,
-                w / 2.,
-                y + i as f32 * line_height,
-                caption.weight,
-                color_attr(&caption.color),
-                escape(line)
-            ));
-        }
-        y += (lines.len() - 1) as f32 * line_height + font_size * 0.45;
     }
 
-    // Device.
-    let device_w = w * 0.78 * slide.device.scale.clamp(0.5, 1.1);
-    let device_h = device_w * DEVICE_ASPECT;
-    let device_x = (w - device_w) / 2.;
-    let device_y = y + h * 0.03 + slide.device.offset * h;
-    let radius = device_w * 0.135;
-    let (bezel, inset) = match slide.device.frame {
-        Frame::Black => (Some("#111114"), device_w * 0.034),
-        Frame::Silver => (Some("#d9dadf"), device_w * 0.034),
-        Frame::None => (None, 0.),
-    };
-    let screen_x = device_x + inset;
-    let screen_y = device_y + inset;
-    let screen_w = device_w - inset * 2.;
-    let screen_h = device_h - inset * 2.;
-    let screen_r = (radius - inset).max(radius * 0.6);
-    svg.push_str(&format!(
-        r##"<clipPath id="screen"><rect x="{screen_x}" y="{screen_y}" width="{screen_w}" height="{screen_h}" rx="{screen_r}"/></clipPath><filter id="shadow" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="{}" stdDeviation="{}" flood-color="#000000" flood-opacity="0.35"/></filter></defs>"##,
-        24. * k,
-        44. * k
-    ));
-    svg.push_str(&format!(r#"<rect width="{w}" height="{h}" fill="{fill}"/>"#));
-    svg.push_str(&text);
-
-    let outline = match bezel {
-        Some(color) => format!(
-            r#"<rect x="{device_x}" y="{device_y}" width="{device_w}" height="{device_h}" rx="{radius}" fill="{color}" filter="url(#shadow)"/>"#
-        ),
-        None => format!(
-            r##"<rect x="{screen_x}" y="{screen_y}" width="{screen_w}" height="{screen_h}" rx="{screen_r}" fill="#000000" filter="url(#shadow)"/>"##
-        ),
-    };
-    svg.push_str(&outline);
-    match &slide.device.screenshot {
-        Some(file) => svg.push_str(&format!(
-            r#"<image x="{screen_x}" y="{screen_y}" width="{screen_w}" height="{screen_h}" preserveAspectRatio="xMidYMid slice" clip-path="url(#screen)" xlink:href="{}"/>"#,
-            escape(file)
-        )),
-        None => svg.push_str(&format!(
-            r##"<rect x="{screen_x}" y="{screen_y}" width="{screen_w}" height="{screen_h}" rx="{screen_r}" fill="#1c1c1f"/><text x="{}" y="{}" font-family="{FONT_FAMILY}" font-size="{}" fill="#8e8e93" text-anchor="middle">Add a screenshot</text>"##,
-            w / 2.,
-            screen_y + screen_h * 0.45,
-            44. * k
-        )),
+    /// Whether resizing keeps the width:height ratio.
+    pub fn keeps_aspect(&self) -> bool {
+        matches!(self.kind, LayerKind::Device { .. })
     }
-    if bezel.is_some() {
-        // The Dynamic Island.
-        let island_w = device_w * 0.3;
-        let island_h = device_w * 0.085;
-        svg.push_str(&format!(
-            r##"<rect x="{}" y="{}" width="{island_w}" height="{island_h}" rx="{}" fill="#000000"/>"##,
-            (w - island_w) / 2.,
-            screen_y + device_w * 0.028,
-            island_h / 2.
-        ));
+
+    pub fn text(id: u64, text: &str, y: f32, size: f32, weight: u16, color: &str) -> Layer {
+        let lines = wrap(text, size, BASE_WIDTH - 184.).len().max(1) as f32;
+        Layer {
+            id,
+            name: text.chars().take(24).collect(),
+            x: 92.,
+            y,
+            width: BASE_WIDTH - 184.,
+            height: (lines * size * LINE_HEIGHT).ceil(),
+            opacity: 1.,
+            hidden: false,
+            locked: false,
+            kind: LayerKind::Text {
+                text: text.into(),
+                size,
+                weight,
+                color: color.into(),
+                align: Align::Center,
+            },
+        }
     }
-    svg.push_str("</svg>");
-    svg
+
+    pub fn device(id: u64, y: f32) -> Layer {
+        let width = BASE_WIDTH * 0.78;
+        Layer {
+            id,
+            name: "iPhone".into(),
+            x: (BASE_WIDTH - width) / 2.,
+            y,
+            width,
+            height: width * DEVICE_ASPECT,
+            opacity: 1.,
+            hidden: false,
+            locked: false,
+            kind: LayerKind::Device {
+                frame: Frame::Black,
+                screenshot: None,
+                shadow: true,
+            },
+        }
+    }
+
+    pub fn image(id: u64, file: String, width: f32, height: f32) -> Layer {
+        Layer {
+            id,
+            name: "Image".into(),
+            x: (BASE_WIDTH - width) / 2.,
+            y: (BASE_HEIGHT - height) / 2.,
+            width,
+            height,
+            opacity: 1.,
+            hidden: false,
+            locked: false,
+            kind: LayerKind::Image {
+                file: Some(file),
+                radius: 36.,
+                shadow: true,
+            },
+        }
+    }
+
+    pub fn shape(id: u64) -> Layer {
+        Layer {
+            id,
+            name: "Shape".into(),
+            x: 260.,
+            y: 1200.,
+            width: 800.,
+            height: 400.,
+            opacity: 1.,
+            hidden: false,
+            locked: false,
+            kind: LayerKind::Shape {
+                fill: "#ffffff".into(),
+                radius: 48.,
+            },
+        }
+    }
 }
 
-/// Renders the slide to PNG bytes at `scale` × the canvas size (1.0 for
-/// export, smaller for previews). `images_dir` holds the screenshots.
-pub fn render_png(slide: &Slide, size: CanvasSize, images_dir: &Path, scale: f32) -> Result<Vec<u8>> {
-    let options = usvg::Options {
-        resources_dir: Some(images_dir.to_path_buf()),
-        fontdb: fonts(),
-        ..Default::default()
+impl Slide {
+    /// A fresh slide: gradient, headline, subheadline and a device.
+    pub fn starter(headline: &str, next_id: &mut u64) -> Slide {
+        let mut id = || {
+            *next_id += 1;
+            *next_id
+        };
+        Slide {
+            background: Background::Gradient {
+                from: "#4f46e5".into(),
+                to: "#9333ea".into(),
+                angle: 160.,
+            },
+            layers: vec![
+                Layer::text(id(), headline, 200., 104., 700, "#ffffff"),
+                Layer::text(id(), "One line on why it matters", 470., 54., 400, "#e0e7ff"),
+                Layer::device(id(), 640.),
+            ],
+        }
+    }
+}
+
+impl Design {
+    /// The largest layer ID in use, for minting new ones.
+    pub fn max_id(&self) -> u64 {
+        self.slides
+            .iter()
+            .flat_map(|slide| &slide.layers)
+            .map(|layer| layer.id)
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// Loads a design, upgrading older saved formats. Missing or unreadable
+    /// files give an empty design.
+    pub fn load(path: &Path) -> Design {
+        let Ok(bytes) = std::fs::read(path) else {
+            return Design::default();
+        };
+        legacy::parse(&bytes).unwrap_or_default()
+    }
+
+    pub fn save(&self, path: &Path) -> std::io::Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let json = serde_json::to_vec_pretty(self).map_err(std::io::Error::other)?;
+        // Write then rename so a crash never leaves half a design.
+        let temp = path.with_extension("json.tmp");
+        std::fs::write(&temp, json)?;
+        std::fs::rename(temp, path)
+    }
+}
+
+/// A rectangle in canvas pixels.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Rect {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+/// Where a device layer's parts go, for both the live canvas and export.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DeviceGeometry {
+    pub body: Rect,
+    pub body_radius: f32,
+    pub screen: Rect,
+    pub screen_radius: f32,
+    /// The Dynamic Island, when there's a bezel.
+    pub island: Option<Rect>,
+}
+
+pub fn device_geometry(layer: &Layer, frame: Frame) -> DeviceGeometry {
+    let body = Rect {
+        x: layer.x,
+        y: layer.y,
+        width: layer.width,
+        height: layer.height,
     };
-    let tree = usvg::Tree::from_str(&to_svg(slide, size), &options)?;
-    let (w, h) = size.pixels();
-    let (pw, ph) = (((w as f32) * scale).round() as u32, ((h as f32) * scale).round() as u32);
-    let mut pixmap = tiny_skia::Pixmap::new(pw.max(1), ph.max(1)).ok_or(Error::Canvas(pw, ph))?;
-    resvg::render(
-        &tree,
-        tiny_skia::Transform::from_scale(scale, scale),
-        &mut pixmap.as_mut(),
-    );
-    pixmap.encode_png().map_err(|error| Error::Png(error.to_string()))
-}
-
-/// System fonts, loaded once: scanning them takes a moment.
-fn fonts() -> Arc<usvg::fontdb::Database> {
-    static FONTS: OnceLock<Arc<usvg::fontdb::Database>> = OnceLock::new();
-    FONTS
-        .get_or_init(|| {
-            let mut db = usvg::fontdb::Database::new();
-            db.load_system_fonts();
-            Arc::new(db)
-        })
-        .clone()
-}
-
-/// The gradient vector in objectBoundingBox units for a CSS angle.
-fn gradient_vector(angle: f32) -> (f32, f32, f32, f32) {
-    let radians = angle.to_radians();
-    let (dx, dy) = (radians.sin() / 2., -radians.cos() / 2.);
-    (0.5 - dx, 0.5 - dy, 0.5 + dx, 0.5 + dy)
+    let body_radius = layer.width * 0.135;
+    let inset = if frame.bezel_color().is_some() {
+        layer.width * 0.034
+    } else {
+        0.
+    };
+    let screen = Rect {
+        x: body.x + inset,
+        y: body.y + inset,
+        width: body.width - inset * 2.,
+        height: body.height - inset * 2.,
+    };
+    let screen_radius = (body_radius - inset).max(body_radius * 0.6);
+    let island = frame.bezel_color().map(|_| {
+        let width = layer.width * 0.3;
+        let height = layer.width * 0.085;
+        Rect {
+            x: body.x + (body.width - width) / 2.,
+            y: screen.y + layer.width * 0.028,
+            width,
+            height,
+        }
+    });
+    DeviceGeometry {
+        body,
+        body_radius,
+        screen,
+        screen_radius,
+        island,
+    }
 }
 
 /// Greedy word wrap by estimated glyph width (about half the font size for
-/// Latin letters, a full em for CJK). Explicit newlines always break.
+/// Latin letters, a full em for CJK). Explicit newlines always break. The
+/// canvas and the export both lay text out with this.
 pub fn wrap(text: &str, font_size: f32, max_width: f32) -> Vec<String> {
     let char_width = |c: char| {
         if c.is_ascii() {
@@ -336,118 +429,87 @@ pub fn wrap(text: &str, font_size: f32, max_width: f32) -> Vec<String> {
                 line = candidate;
             }
         }
-        if !line.is_empty() {
-            lines.push(line);
-        }
+        lines.push(line);
+    }
+    while lines.last().is_some_and(String::is_empty) {
+        lines.pop();
     }
     lines
 }
 
-/// `#rrggbb` or `#rgb`, else a safe default, so user input can't break the SVG.
-fn color_attr(color: &str) -> String {
+/// `#rrggbb`/`#rgb` parsed to RGB, for the canvas.
+pub fn parse_color(color: &str) -> Option<(u8, u8, u8)> {
     let hex = color.trim().trim_start_matches('#');
-    if (hex.len() == 6 || hex.len() == 3) && hex.chars().all(|c| c.is_ascii_hexdigit()) {
-        format!("#{hex}")
-    } else {
-        "#000000".into()
-    }
+    let full: String = match hex.len() {
+        3 => hex.chars().flat_map(|c| [c, c]).collect(),
+        6 => hex.to_owned(),
+        _ => return None,
+    };
+    let value = u32::from_str_radix(&full, 16).ok()?;
+    Some(((value >> 16) as u8, (value >> 8) as u8, value as u8))
 }
 
-fn escape(text: &str) -> String {
-    text.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-}
-
-impl Design {
-    pub fn load(path: &Path) -> Design {
-        std::fs::read(path)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-            .unwrap_or_default()
-    }
-
-    pub fn save(&self, path: &Path) -> std::io::Result<()> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
+/// What slide `index` shows: its own visible layers, then the parts of
+/// other slides' layers that reach onto it, shifted into its coordinates.
+/// Each comes with the index of the slide that owns it.
+pub fn visible_layers(slides: &[Slide], index: usize) -> Vec<(usize, Layer)> {
+    let mut layers: Vec<(usize, Layer)> = slides
+        .get(index)
+        .map(|slide| {
+            slide
+                .layers
+                .iter()
+                .filter(|l| !l.hidden)
+                .map(|l| (index, l.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
+    for (owner, slide) in slides.iter().enumerate().filter(|(owner, _)| *owner != index) {
+        let shift = (owner as f32 - index as f32) * BASE_WIDTH;
+        for layer in slide.layers.iter().filter(|l| !l.hidden) {
+            let x = layer.x + shift;
+            if x < BASE_WIDTH && x + layer.width > 0. {
+                let mut part = layer.clone();
+                part.x = x;
+                layers.push((owner, part));
+            }
         }
-        let json = serde_json::to_vec_pretty(self).map_err(std::io::Error::other)?;
-        // Write then rename, so a crash never leaves half a design.
-        let temp = path.with_extension("json.tmp");
-        std::fs::write(&temp, json)?;
-        std::fs::rename(temp, path)
     }
+    layers
+}
+
+/// Renders slide `index` to PNG bytes at `scale` × the canvas size (1.0 for
+/// export, smaller for thumbnails), including layers spanning in from its
+/// neighbours. `images_dir` holds the design's images.
+pub fn render_png(slides: &[Slide], index: usize, size: CanvasSize, images_dir: &Path, scale: f32) -> Result<Vec<u8>> {
+    let options = usvg::Options {
+        resources_dir: Some(images_dir.to_path_buf()),
+        fontdb: fonts(),
+        ..Default::default()
+    };
+    let tree = usvg::Tree::from_str(&to_svg(slides, index, size), &options)?;
+    let (w, h) = size.pixels();
+    let (pw, ph) = (((w as f32) * scale).round() as u32, ((h as f32) * scale).round() as u32);
+    let mut pixmap = tiny_skia::Pixmap::new(pw.max(1), ph.max(1)).ok_or(Error::Canvas(pw, ph))?;
+    resvg::render(
+        &tree,
+        tiny_skia::Transform::from_scale(scale, scale),
+        &mut pixmap.as_mut(),
+    );
+    pixmap.encode_png().map_err(|error| Error::Png(error.to_string()))
+}
+
+/// System fonts, loaded once: scanning them takes a moment.
+fn fonts() -> Arc<usvg::fontdb::Database> {
+    static FONTS: OnceLock<Arc<usvg::fontdb::Database>> = OnceLock::new();
+    FONTS
+        .get_or_init(|| {
+            let mut db = usvg::fontdb::Database::new();
+            db.load_system_fonts();
+            Arc::new(db)
+        })
+        .clone()
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn wraps_by_width_and_newlines() {
-        assert_eq!(wrap("Plan your day", 100., 2000.), vec!["Plan your day"]);
-        assert_eq!(
-            wrap("Plan your whole day in seconds", 100., 1000.),
-            vec!["Plan your whole", "day in seconds"]
-        );
-        assert_eq!(wrap("One\nTwo", 100., 2000.), vec!["One", "Two"]);
-        assert!(wrap("   ", 100., 100.).is_empty());
-    }
-
-    #[test]
-    fn svg_escapes_text_and_sanitises_colors() {
-        let mut slide = Slide::default();
-        slide.headline.text = "Tasks & <notes>".into();
-        slide.headline.color = "red\" onload=\"x".into();
-        let svg = to_svg(&slide, CanvasSize::Iphone69);
-        assert!(svg.contains("Tasks &amp; &lt;notes&gt;"));
-        assert!(!svg.contains("onload"));
-        assert!(svg.contains(r#"width="1320" height="2868""#));
-        assert!(svg.contains("Add a screenshot"));
-    }
-
-    #[test]
-    fn gradient_angles_follow_css() {
-        let close = |a: (f32, f32, f32, f32), b: (f32, f32, f32, f32)| {
-            (a.0 - b.0).abs() < 1e-4 && (a.1 - b.1).abs() < 1e-4 && (a.2 - b.2).abs() < 1e-4 && (a.3 - b.3).abs() < 1e-4
-        };
-        assert!(
-            close(gradient_vector(180.), (0.5, 0., 0.5, 1.)),
-            "180° runs top to bottom"
-        );
-        assert!(
-            close(gradient_vector(90.), (0., 0.5, 1., 0.5)),
-            "90° runs left to right"
-        );
-    }
-
-    #[test]
-    fn renders_png_at_export_and_preview_sizes() {
-        let dir = std::env::temp_dir();
-        let slide = Slide::default();
-        for (size, scale) in [(CanvasSize::Iphone69, 1.0), (CanvasSize::Iphone65, 0.25)] {
-            let png = render_png(&slide, size, &dir, scale).unwrap();
-            assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
-            let (w, h) = size.pixels();
-            let width = u32::from_be_bytes(png[16..20].try_into().unwrap());
-            let height = u32::from_be_bytes(png[20..24].try_into().unwrap());
-            assert_eq!(
-                (width, height),
-                (((w as f32) * scale).round() as u32, ((h as f32) * scale).round() as u32)
-            );
-        }
-    }
-
-    #[test]
-    fn design_round_trips_to_disk() {
-        let path = std::env::temp_dir().join(format!("appdoctor-design-{}/design.json", std::process::id()));
-        let design = Design {
-            slides: vec![Slide::default(), Slide::default()],
-        };
-        design.save(&path).unwrap();
-        assert_eq!(Design::load(&path), design);
-        assert_eq!(Design::load(Path::new("/nonexistent/design.json")), Design::default());
-        let _ = std::fs::remove_dir_all(path.parent().unwrap());
-    }
-}
+mod tests;

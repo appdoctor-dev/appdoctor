@@ -1,15 +1,16 @@
-//! AppDoctor's look: gpui-kit's light/dark themes following the system,
-//! with an indigo accent.
+//! AppDoctor's look: macOS's own greys and system indigo on top of
+//! gpui-kit's light/dark themes, following the system appearance.
 
 use gpui_kit::component::Theme;
-use gpui_kit::{App, Hsla, Window, hsla, px};
+use gpui_kit::{App, Hsla, Window, px, rgb};
 
+/// Apple's systemIndigo.
 fn accent(dark: bool) -> Hsla {
-    if dark {
-        hsla(243. / 360., 0.85, 0.68, 1.)
-    } else {
-        hsla(243. / 360., 0.75, 0.59, 1.)
-    }
+    hex(if dark { 0x5e5ce6 } else { 0x5856d6 })
+}
+
+fn hex(value: u32) -> Hsla {
+    rgb(value).into()
 }
 
 /// Follows the system appearance and applies the accent. Call again when
@@ -36,6 +37,57 @@ pub fn apply(window: Option<&mut Window>, cx: &mut App) {
         theme.progress_bar = accent;
         theme.sidebar_primary = accent;
         theme.link = accent;
+        theme.slider_bar = accent;
+        theme.switch_thumb = hex(0xffffff);
+        theme.slider_thumb = hex(0xffffff);
+        theme.radius = px(8.);
+        theme.radius_lg = px(12.);
+
+        // AppKit's window, sidebar and control greys rather than the
+        // near-black / pure-white web defaults.
+        let dark = theme.mode.is_dark();
+        let (background, raised, control, control_hover, separator, secondary_label, label) = if dark {
+            (0x1e1e1e, 0x262628, 0x2c2c2e, 0x3a3a3c, 0x38383a, 0x98989d, 0xf5f5f7)
+        } else {
+            (0xffffff, 0xf5f5f7, 0xf2f2f7, 0xe5e5ea, 0xe0e0e5, 0x6e6e73, 0x1d1d1f)
+        };
+        theme.background = hex(background);
+        theme.foreground = hex(label);
+        theme.border = hex(separator);
+        theme.input = hex(control_hover);
+        theme.muted = hex(control);
+        theme.muted_foreground = hex(secondary_label);
+        theme.secondary = hex(control);
+        theme.secondary_hover = hex(control_hover);
+        theme.accent = hex(control);
+        theme.list_hover = hex(control);
+        theme.popover = hex(if dark { 0x2c2c2e } else { 0xffffff });
+        theme.sidebar = hex(raised);
+        theme.sidebar_border = hex(separator);
+        theme.sidebar_accent = hex(if dark { 0x3a3a3c } else { 0xe3e3e8 });
+        theme.title_bar = hex(raised);
+        theme.title_bar_border = hex(separator);
+        theme.switch = hex(control_hover);
+        // Tables and lists like Finder's: the window colour with faint
+        // alternate rows, and the accent for the selection.
+        let stripe = theme.foreground.opacity(if dark { 0.025 } else { 0.03 });
+        theme.table = hex(background);
+        theme.table_head = hex(background);
+        theme.table_foot = hex(background);
+        theme.table_even = stripe;
+        theme.table_hover = hex(control);
+        theme.table_row_border = hex(background);
+        theme.table_active = accent.opacity(0.22);
+        theme.table_active_border = accent.opacity(0.0);
+        theme.colors.list = hex(background);
+        theme.list_head = hex(background);
+        theme.list_even = stripe;
+        theme.list_active = accent.opacity(0.22);
+        theme.list_active_border = accent.opacity(0.0);
+        theme.status_bar = hex(raised);
+        theme.status_bar_border = hex(separator);
+        theme.tab_bar = hex(raised);
+        theme.tab_bar_segmented = hex(control);
     });
 }
 

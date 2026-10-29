@@ -130,17 +130,32 @@ Every section in the sidebar is a page of this one window.
   - *Review and save…* lists every change in a dialog before writing to App
     Store Connect.
   - **Not yet run against a real account.**
-- **Screenshots.** A designer for App Store screenshots, inside the app.
-  - Slides with a gradient or solid background (presets included), headline
-    and subheadline, and a device frame (black, silver or none) holding your
-    screenshot, with size and position controls.
-  - The live preview uses the same resvg renderer as the export.
-  - *Export PNGs* writes every slide at 6.9" (1320×2868) and 6.5"
-    (1242×2688).
+- **Screenshots.** A layer editor for App Store screenshots, inside the app.
+  - Every screenshot sits side by side on one stage. Each has a background
+    (gradient presets, or your own gradient or solid colour) and a stack of
+    layers: text, iPhone (black, silver or no frame, holding your
+    screenshot), image and shape.
+  - Drag a layer to move it; it snaps to the canvas and to other layers
+    (hold ⌥ to skip snapping). Drag a corner to resize it; phones keep their
+    shape, and ⇧ keeps any layer's. You can also type X, Y, W and H.
+  - Layers spread across screenshots. A layer hanging off one screenshot's
+    edge continues on its neighbour, both in the editor and in the export,
+    and a layer dropped mostly over the next screenshot moves there.
+  - The Layers list hides, locks and selects layers. The floating toolbar
+    adds them and fades away while you drag. Hide either panel from the
+    header or with ⌘\.
+  - Shortcuts: ⌘Z / ⇧⌘Z to undo and redo (100 steps), ⌘D to duplicate,
+    ⌘] / ⌘[ to bring forward or send back, ⌫ to delete, the arrow keys to
+    nudge (⇧ for 10), and Esc to deselect.
+  - *Export PNGs* writes every screenshot at 6.9" (1320×2868) and 6.5"
+    (1242×2688), rendered with resvg.
   - Designs save automatically per app in
-    `<data folder>/screenshots/<app id>/`.
-  - The designer screen itself hasn't been clicked through yet; the renderer
-    is unit-tested and was checked by eye.
+    `<data folder>/screenshots/<app id>/design.json`. Designs from the first
+    version, with one headline, subheadline and device per slide, are
+    upgraded on load.
+  - Checked by hand with demo data: selecting, the text inspector, the
+    segmented controls and the panel toggles. Dragging across screenshots is
+    unit-tested but hasn't been tried by hand yet.
 - **App Review** (Ship → App Review).
   - It loads the editable iOS version, the app's builds and its review
     submissions from App Store Connect.

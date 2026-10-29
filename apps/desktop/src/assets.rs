@@ -16,12 +16,20 @@ static EXTRA: &[(&str, &[u8])] = extra_icons![
     "image",
     "key-round",
     "languages",
+    "lock",
+    "lock-open",
     "log-out",
+    "panel-right-close",
     "smartphone",
     "sparkles",
     "stethoscope",
+    "text-align-center",
+    "text-align-end",
+    "text-align-start",
     "trending-up",
+    "type",
     "users",
+    "zoom-in",
 ];
 
 pub struct Assets;

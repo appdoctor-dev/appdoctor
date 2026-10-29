@@ -3,6 +3,7 @@
 mod app_search;
 mod apps;
 mod competitors;
+mod controls;
 mod keyword_table;
 mod keywords;
 mod localization;

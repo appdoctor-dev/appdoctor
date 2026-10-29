@@ -258,6 +258,7 @@ dependencies = [
  "dirs 7.0.0",
  "futures",
  "gpui-kit",
+ "imagesize 0.14.0",
  "reqwest",
  "tokio",
  "tracing",
