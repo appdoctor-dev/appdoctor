@@ -100,7 +100,8 @@ Auth's device flow. The API's token is verified offline against
 ## What works and what's stubbed
 
 Working:
-- Adding an app by App Store link or ID.
+- Adding an app by searching the App Store by name (type-ahead dropdown
+  with icons, ratings and "Tracked" markers), or by link or ID.
 - Keywords per storefront, with a searchable country picker.
 - A virtualized keyword table: popularity, difficulty, position, change since
   the last check, the apps in the top results, last update, sorting, and a

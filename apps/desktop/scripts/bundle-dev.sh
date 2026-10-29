@@ -9,7 +9,10 @@ cd "$(dirname "$0")/../../.."
 cargo build -p appdoctor-desktop "$@"
 APP=target/debug/AppDoctor.app
 mkdir -p "$APP/Contents/MacOS"
-cp target/debug/appdoctor "$APP/Contents/MacOS/appdoctor"
+# Copy then rename: overwriting a running binary in place can get it killed
+# for an invalid code signature; a rename leaves the running copy intact.
+cp target/debug/appdoctor "$APP/Contents/MacOS/appdoctor.new"
+mv -f "$APP/Contents/MacOS/appdoctor.new" "$APP/Contents/MacOS/appdoctor"
 VERSION=$(cargo pkgid -p appdoctor-desktop | sed 's/.*[#@]//')
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
