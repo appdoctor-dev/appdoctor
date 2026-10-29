@@ -31,6 +31,9 @@ pub struct AppSearch {
     taken: Vec<u64>,
     suggestions: Vec<SearchHit>,
     suggested_for: String,
+    /// The dropdown shows while true; a click elsewhere closes it, so it
+    /// never sits over the page blocking clicks.
+    open: bool,
     searching: bool,
     _search: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
@@ -48,6 +51,10 @@ impl AppSearch {
         let subscriptions = vec![cx.subscribe_in(&input, window, |this, _, event, _, cx| match event {
             InputEvent::PressEnter { .. } => this.submit(cx),
             InputEvent::Change => this.search(cx),
+            InputEvent::Focus => {
+                this.open = !this.suggested_for.is_empty();
+                cx.notify();
+            }
             _ => {}
         })];
         Self {
@@ -57,6 +64,7 @@ impl AppSearch {
             taken: Vec::new(),
             suggestions: Vec::new(),
             suggested_for: String::new(),
+            open: false,
             searching: false,
             _search: None,
             _subscriptions: subscriptions,
@@ -96,6 +104,7 @@ impl AppSearch {
         }
         let services = self.state.read(cx).services.clone();
         let country = self.country.clone();
+        self.open = true;
         self.searching = true;
         cx.notify();
         // Replacing the task cancels the previous keystroke's search.
@@ -138,7 +147,7 @@ impl AppSearch {
 
     fn dropdown(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
         let query = self.input.read(cx).value().trim().to_owned();
-        if self.suggested_for.is_empty() || query.is_empty() || parse_app_ref(&query).is_ok() {
+        if !self.open || self.suggested_for.is_empty() || query.is_empty() || parse_app_ref(&query).is_ok() {
             return None;
         }
         let icons = self.state.read(cx).icons.clone();
@@ -195,7 +204,10 @@ impl AppSearch {
                             .text_color(theme.primary)
                             .into_any_element()
                     })
-                    .on_click(cx.listener(move |_, _, _, cx| cx.emit(AppSearchEvent::Picked(picked.clone()))))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.open = false;
+                        cx.emit(AppSearchEvent::Picked(picked.clone()));
+                    }))
             })
             .collect();
         let empty = rows.is_empty();
@@ -235,6 +247,12 @@ impl Render for AppSearch {
         div()
             .relative()
             .w_full()
+            .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+                if this.open {
+                    this.open = false;
+                    cx.notify();
+                }
+            }))
             .child(
                 Input::new(&self.input)
                     .prefix(Icon::new(IconName::Search).small().text_color(muted))

@@ -43,7 +43,8 @@ Cargo.toml              one workspace; the npm/turbo side of the repo never touc
 apps/desktop            the `appdoctor` binary: GPUI window, views, app state
 crates/appstore         App Store–native search (MZStore), iTunes Lookup/Search fallback, URL parsing, storefronts, throttle
 crates/store            SQLite (WAL) + migrations: apps, keywords, rank snapshots, popularity, competitors, settings
-crates/scoring          keyword difficulty from the top 10 results (opt-level 3 even in dev)
+crates/scoring          keyword difficulty from the top 10, candidate keywords from metadata (opt-level 3)
+crates/screenshots      screenshot designs: model, SVG layout, PNG render via resvg (opt-level 3)
 crates/jwt              ES256 signing and P-256 key handling for both Apple APIs
 crates/asc              App Store Connect: localizations, builds, build upload, App Review submissions (confirm-gated)
 crates/apple-ads        Apple Ads Platform API 1.0: client secret, token, ACLs, popularity, suggestions
@@ -66,7 +67,7 @@ return `Task`s, and the calling view reports any error in its own window.
 
 **Rank check** (`rank_check.rs`). Every keyword is searched in its storefront
 (about 250 results). The job records the app's rank, a difficulty score from the top 10,
-and those 10 apps (id, name, icon), then refreshes Apple Ads popularity if
+those 10 apps (id, name, icon) and the full result order, then refreshes Apple Ads popularity if
 Apple Ads is connected. Up to 8 searches are in flight at once, and the iTunes
 client's throttle sets the real pace: it starts quick and halves when Apple
 answers 403/429/503. Searches go through the `SearchSource` trait.
@@ -99,43 +100,68 @@ Auth's device flow. The API's token is verified offline against
 
 ## What works and what's stubbed
 
-Working:
-- Adding an app by searching the App Store by name (type-ahead dropdown
-  with icons, ratings and "Tracked" markers), or by link or ID.
-- Keywords per storefront, with a searchable country picker.
-- A virtualized keyword table: popularity, difficulty, position, change since
-  the last check, the apps in the top results, last update, sorting, and a
-  right-click Delete.
-- Check ranks, with live progress.
-- Settings:
-  - App Store Connect key: Issuer ID, Key ID and a `.p8` file picker. It is
-    saved to the keychain and can be tested by listing apps.
-  - Apple Ads: generate a key pair, copy the public PEM, enter the IDs, then
-    test. The test resolves the ad account from `/v1/acls`.
-  - Account sign-in, licence status, the API server address, the update check
-    and the data folder.
+Every section in the sidebar is a page of this one window.
 
-- **App Review** (Ship → App Review). It loads the editable iOS version, the
-  app's builds and its review submissions from App Store Connect. You pick a
-  processed build and Manual or When-approved release. *Review and submit…*
-  reads a plan and opens a confirmation dialog showing the app, version,
-  build, release type and export compliance. Only that dialog's button
-  submits. Withdrawing a submission has its own confirmation. **This has
-  not been run against a real App Store Connect account.**
+- **Apps.** Add apps by searching the App Store by name (a type-ahead
+  dropdown with icons, ratings and "Added" markers) or by link or ID. Remove
+  them from the Apps page or by right-clicking in the sidebar; removing asks
+  first, since it deletes the app's keywords and history.
+- **Keywords.** Keywords per storefront with a searchable country picker,
+  and a virtualized table: popularity, difficulty, position, change since the
+  last check (same source only), the apps in the top results and last update.
+  It sorts, and right-click deletes. *Check ranks* shows live progress.
+- **Rankings.** Rank history per storefront: keywords in the top 10 per check,
+  average position, and a chart per keyword (#1 at the top) with its check
+  log.
+- **Competitors.** Track competitors with the search field, or from
+  suggestions (apps in the top 10 for most of your keywords).
+  - Compare ranks side by side on your keywords. These come free from your
+    own checks, which store the full result order.
+  - *Find their keywords* builds candidate searches from the competitor's
+    title, description and App Store search suggestions (about 36 searches).
+    It lists where they rank, with your rank, difficulty and one-click Track.
+- **Localization.** Loads every language's name, subtitle, keywords,
+  promotional text, description and what's new from App Store Connect.
+  - Edit them with character limits. An ASO helper flags keyword-field words
+    already in the name or subtitle, repeats and spaces after commas, and
+    shows which tracked keywords the metadata covers; click one to add its
+    missing words.
+  - Add languages.
+  - *Review and save…* lists every change in a dialog before writing to App
+    Store Connect.
+  - **Not yet run against a real account.**
+- **Screenshots.** A designer for App Store screenshots, inside the app.
+  - Slides with a gradient or solid background (presets included), headline
+    and subheadline, and a device frame (black, silver or none) holding your
+    screenshot, with size and position controls.
+  - The live preview uses the same resvg renderer as the export.
+  - *Export PNGs* writes every slide at 6.9" (1320×2868) and 6.5"
+    (1242×2688).
+  - Designs save automatically per app in
+    `<data folder>/screenshots/<app id>/`.
+  - The designer screen itself hasn't been clicked through yet; the renderer
+    is unit-tested and was checked by eye.
+- **App Review** (Ship → App Review).
+  - It loads the editable iOS version, the app's builds and its review
+    submissions from App Store Connect.
+  - You pick a processed build and Manual or When-approved release.
+    *Review and submit…* reads a plan and opens a confirmation dialog showing
+    the app, version, build, release type and export compliance. Only that
+    dialog's button submits.
+  - Withdrawing a submission has its own confirmation.
+  - **Not yet run against a real App Store Connect account.**
+- **Settings.**
+  - App Store Connect key: Issuer ID, Key ID and a `.p8` picker, saved to
+    the keychain and testable.
+  - Apple Ads: generate a key pair, copy the public PEM, enter the IDs, test.
+  - Account sign-in, licence status, the API address, the update check and
+    the data folder.
 
-Stubbed (a sidebar entry with an explanation):
-- **Rankings**: history charts. The snapshots are already recorded.
-- **Competitors**.
-- **Localization**: the `asc` client is done; the editor isn't.
-- **Screenshots**.
-
-Planned, all as sections of this same window (one app, not separate tools):
-- **Screenshot designer** (device frames, captions, every export size): a
-  `crates/screenshots` with its pixel work in an opt-level-3 kernels crate,
-  like Cap's.
+Planned, also as sections of this window:
 - **App preview video designer.**
-- **Competitor tracking and review analysis.** Each rank snapshot already
-  stores the top 10 apps per keyword, which is the data for "who outranks me".
+- **Review analysis** for your apps and competitors.
+- **AI help in the screenshot designer.** One prompt sets the background,
+  copy and device layout, through the user's own AI provider.
 - **Local MCP server** (`crates/mcp`, localhost only), so the user's own agent
   can drive AppDoctor. For example, "localize my app into these languages"
   writes through `crates/asc`.

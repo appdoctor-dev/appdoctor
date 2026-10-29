@@ -22,6 +22,7 @@ appdoctor-asc.workspace = true
 appdoctor-entitlement.workspace = true
 appdoctor-jwt.workspace = true
 appdoctor-scoring.workspace = true
+appdoctor-screenshots.workspace = true
 appdoctor-secrets.workspace = true
 appdoctor-store.workspace = true
 anyhow.workspace = true

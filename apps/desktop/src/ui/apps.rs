@@ -182,10 +182,7 @@ impl Render for AppsView {
                                     .ghost()
                                     .label("Remove")
                                     .on_click(cx.listener(move |this, _, window, cx| {
-                                        if let Err(error) = this.state.update(cx, |state, cx| state.remove_app(id, cx))
-                                        {
-                                            window.push_notification(Notification::error(error.to_string()), cx);
-                                        }
+                                        confirm_remove_app(this.state.clone(), id, window, cx)
                                     })),
                             ),
                     )
@@ -232,4 +229,36 @@ impl Render for AppsView {
             )
             .child(h_flex().flex_wrap().gap_4().children(cards))
     }
+}
+
+/// Asks before removing an app: it deletes the app's keywords and their
+/// rank history from this computer.
+pub fn confirm_remove_app(state: Entity<AppState>, id: u64, window: &mut Window, cx: &mut App) {
+    let Some(app) = state.read(cx).app(id).cloned() else {
+        return;
+    };
+    let keywords = state.read(cx).keyword_count(id);
+    window.open_dialog(cx, move |dialog, _, cx| {
+        let state = state.clone();
+        dialog
+            .title(format!("Remove {}?", app.name))
+            .w(px(440.))
+            .child(div().text_sm().text_color(cx.theme().muted_foreground).child(format!(
+                "This deletes its {keywords} keyword{} and their rank history from this Mac. The app on the App Store isn't affected.",
+                if keywords == 1 { "" } else { "s" }
+            )))
+            .footer(
+                h_flex()
+                    .w_full()
+                    .justify_end()
+                    .gap_2()
+                    .child(Button::new("keep-app").ghost().label("Cancel").on_click(|_, window, cx| window.close_dialog(cx)))
+                    .child(Button::new("confirm-remove-app").danger().label("Remove").on_click(move |_, window, cx| {
+                        window.close_dialog(cx);
+                        if let Err(error) = state.update(cx, |state, cx| state.remove_app(id, cx)) {
+                            window.push_notification(Notification::error(error.to_string()), cx);
+                        }
+                    })),
+            )
+    });
 }

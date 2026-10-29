@@ -251,6 +251,7 @@ dependencies = [
  "appdoctor-entitlement",
  "appdoctor-jwt",
  "appdoctor-scoring",
+ "appdoctor-screenshots",
  "appdoctor-secrets",
  "appdoctor-store",
  "chrono",
@@ -293,6 +294,16 @@ dependencies = [
 [[package]]
 name = "appdoctor-scoring"
 version = "0.1.0"
+
+[[package]]
+name = "appdoctor-screenshots"
+version = "0.1.0"
+dependencies = [
+ "resvg 0.46.0",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
 
 [[package]]
 name = "appdoctor-secrets"

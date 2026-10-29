@@ -2,6 +2,7 @@
 //! sections of the selected app), and the current page.
 
 use appdoctor_entitlement::Status;
+use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
 use gpui_kit::component::{ActiveTheme as _, Icon, IconName, Sizable as _, TitleBar, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -9,12 +10,12 @@ use gpui_kit::*;
 use crate::state::{AppState, Section, UpdateStatus};
 use crate::theme::{self, meter};
 use crate::ui::apps::AppsView;
-use crate::ui::coming_soon;
 use crate::ui::competitors::CompetitorsView;
 use crate::ui::keywords::KeywordsView;
 use crate::ui::localization::LocalizationView;
 use crate::ui::rankings::RankingsView;
 use crate::ui::release::ReleaseView;
+use crate::ui::screenshots::ScreenshotsView;
 use crate::ui::settings::SettingsView;
 use crate::ui::widgets::{app_icon, flag, status_dot};
 
@@ -28,6 +29,7 @@ pub struct Shell {
     rankings: Entity<RankingsView>,
     competitors: Entity<CompetitorsView>,
     localization: Entity<LocalizationView>,
+    screenshots: Entity<ScreenshotsView>,
     settings: Entity<SettingsView>,
     _subscriptions: Vec<Subscription>,
 }
@@ -40,6 +42,7 @@ impl Shell {
         let rankings = cx.new(|cx| RankingsView::new(state.clone(), cx));
         let competitors = cx.new(|cx| CompetitorsView::new(state.clone(), window, cx));
         let localization = cx.new(|cx| LocalizationView::new(state.clone(), window, cx));
+        let screenshots = cx.new(|cx| ScreenshotsView::new(state.clone(), window, cx));
         let settings = cx.new(|cx| SettingsView::new(state.clone(), window, cx));
         let subscriptions = vec![
             cx.observe(&state, |_, _, cx| cx.notify()),
@@ -53,6 +56,7 @@ impl Shell {
             rankings,
             competitors,
             localization,
+            screenshots,
             settings,
             _subscriptions: subscriptions,
         }
@@ -181,6 +185,15 @@ impl Shell {
                             }
                         })
                     }))
+                    .context_menu({
+                        let state = self.state.clone();
+                        move |menu, _, _| {
+                            let state = state.clone();
+                            menu.item(PopupMenuItem::new("Remove app…").on_click(move |_, window, cx| {
+                                crate::ui::apps::confirm_remove_app(state.clone(), id, window, cx)
+                            }))
+                        }
+                    })
             })
             .collect();
 
@@ -377,8 +390,8 @@ impl Render for Shell {
             Section::Rankings => self.rankings.clone().into_any_element(),
             Section::Competitors => self.competitors.clone().into_any_element(),
             Section::Localization => self.localization.clone().into_any_element(),
+            Section::Screenshots => self.screenshots.clone().into_any_element(),
             Section::Settings => self.settings.clone().into_any_element(),
-            other => coming_soon::render(other, cx),
         };
         v_flex()
             .size_full()

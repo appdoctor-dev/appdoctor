@@ -26,6 +26,7 @@ appdoctor-scoring = { path = "crates/scoring" }
 appdoctor-entitlement = { path = "crates/entitlement" }
 appdoctor-secrets = { path = "crates/secrets" }
 appdoctor-jwt = { path = "crates/jwt" }
+appdoctor-screenshots = { path = "crates/screenshots" }
 
 # gpui-kit pins the exact gpui-pre snapshot it was released against and
 # re-exports gpui, gpui-base and gpui-component, so it is the only UI dep.
@@ -71,6 +72,11 @@ debug = "line-tables-only"
 # Pure-computation crates that run over many rows (difficulty scoring over
 # every keyword's top results) build optimised even in dev, like Cap's kernels.
 [profile.dev.package.appdoctor-scoring]
+opt-level = 3
+
+# Screenshot rendering rasterises full App Store canvases; like Cap's
+# kernels crate, it builds optimised so previews stay interactive in dev.
+[profile.dev.package.appdoctor-screenshots]
 opt-level = 3
 
 [profile.dev.package.appdoctor-desktop]
