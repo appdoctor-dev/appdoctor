@@ -34,7 +34,8 @@ const MIGRATIONS: &[&str] = &[
         results_count  INTEGER NOT NULL,
         difficulty     REAL,
         source         TEXT NOT NULL,
-        top_app_ids    TEXT NOT NULL DEFAULT ''
+        -- JSON array of {id, name, icon_url} for the top results, best first.
+        top_apps       TEXT NOT NULL DEFAULT '[]'
     );
     CREATE INDEX rank_snapshots_by_keyword ON rank_snapshots (keyword_id, checked_at DESC);
 

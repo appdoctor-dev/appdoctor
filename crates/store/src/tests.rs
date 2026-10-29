@@ -23,7 +23,13 @@ fn snapshot(keyword_id: KeywordId, checked_at: i64, rank: Option<u32>) -> Snapsh
         results_count: 200,
         difficulty: Some(42.0),
         source: "itunes-search".into(),
-        top_app_ids: vec![1, 2, 3],
+        top_apps: (1..=3)
+            .map(|id| TopApp {
+                id,
+                name: format!("App {id}"),
+                icon_url: None,
+            })
+            .collect(),
     }
 }
 
@@ -124,7 +130,12 @@ fn keyword_rows_carry_latest_and_previous_checks() {
         history.iter().map(|s| s.rank).collect::<Vec<_>>(),
         vec![Some(4), Some(12), Some(999)]
     );
-    assert_eq!(history[0].top_app_ids, vec![1, 2, 3]);
+    assert_eq!(
+        history[0].top_apps.iter().map(|app| app.id).collect::<Vec<_>>(),
+        vec![1, 2, 3]
+    );
+    assert_eq!(up_row.top_apps.len(), 3);
+    assert_eq!(up_row.latest.unwrap().results_count, 200);
 }
 
 #[test]

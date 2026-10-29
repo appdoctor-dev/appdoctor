@@ -207,6 +207,14 @@ impl RawApp {
             .or_else(|| self.artwork_url100.clone())
             .or_else(|| self.artwork_url60.clone())
     }
+
+    /// Search hits are shown as small icons in rows; 100px is plenty.
+    fn small_icon(&self) -> Option<String> {
+        self.artwork_url100
+            .clone()
+            .or_else(|| self.artwork_url60.clone())
+            .or_else(|| self.artwork_url512.clone())
+    }
 }
 
 pub(crate) fn parse_lookup(body: &str) -> Result<Vec<AppDetails>> {
@@ -239,7 +247,7 @@ pub(crate) fn parse_search(body: &str) -> Result<Vec<SearchHit>> {
         .filter(RawApp::is_app)
         .map(|raw| SearchHit {
             id: AppId(raw.track_id.unwrap_or_default()),
-            icon_url: raw.icon(),
+            icon_url: raw.small_icon(),
             title: raw.track_name.unwrap_or_default(),
             subtitle: None,
             developer: raw.seller_name.or(raw.artist_name),

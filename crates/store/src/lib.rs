@@ -16,6 +16,7 @@ use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
 use rusqlite::{Connection, OptionalExtension as _, params};
+use serde::{Deserialize, Serialize};
 
 pub type KeywordId = i64;
 
@@ -60,6 +61,8 @@ pub struct KeywordRow {
     pub latest: Option<CheckSummary>,
     pub previous: Option<CheckSummary>,
     pub popularity: Option<u8>,
+    /// The top results at the latest check, best first.
+    pub top_apps: Vec<TopApp>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -68,6 +71,16 @@ pub struct CheckSummary {
     pub rank: Option<u32>,
     pub checked_at: i64,
     pub difficulty: Option<f32>,
+    /// How many results the search returned.
+    pub results_count: u32,
+}
+
+/// An app in a keyword's top results.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TopApp {
+    pub id: u64,
+    pub name: String,
+    pub icon_url: Option<String>,
 }
 
 /// How a keyword's rank moved between its last two checks.
@@ -121,8 +134,8 @@ pub struct Snapshot {
     pub difficulty: Option<f32>,
     /// The search source's name, so history from different sources isn't mixed.
     pub source: String,
-    /// App IDs of the top results, best first, for competitor tracking.
-    pub top_app_ids: Vec<u64>,
+    /// The top results, best first, for the keyword table and competitor tracking.
+    pub top_apps: Vec<TopApp>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -275,16 +288,16 @@ impl Store {
         let conn = self.conn();
         let mut statement = conn.prepare_cached(
             "WITH ranked AS (
-                SELECT s.keyword_id, s.rank, s.checked_at, s.difficulty,
+                SELECT s.keyword_id, s.rank, s.checked_at, s.difficulty, s.results_count, s.top_apps,
                        ROW_NUMBER() OVER (PARTITION BY s.keyword_id
                                           ORDER BY s.checked_at DESC, s.id DESC) AS rn
                 FROM rank_snapshots s JOIN keywords k ON k.id = s.keyword_id
                 WHERE k.app_id = ?1
              )
              SELECT k.id, k.app_id, k.term, k.country, k.created_at,
-                    cur.checked_at, cur.rank, cur.difficulty,
-                    prev.checked_at, prev.rank, prev.difficulty,
-                    p.popularity
+                    cur.checked_at, cur.rank, cur.difficulty, cur.results_count,
+                    prev.checked_at, prev.rank, prev.difficulty, prev.results_count,
+                    p.popularity, cur.top_apps
              FROM keywords k
              LEFT JOIN ranked cur ON cur.keyword_id = k.id AND cur.rn = 1
              LEFT JOIN ranked prev ON prev.keyword_id = k.id AND prev.rn = 2
@@ -300,6 +313,7 @@ impl Store {
                         checked_at,
                         rank: row.get::<_, Option<i64>>(offset + 1)?.map(|rank| rank as u32),
                         difficulty: row.get::<_, Option<f64>>(offset + 2)?.map(|d| d as f32),
+                        results_count: row.get::<_, Option<u32>>(offset + 3)?.unwrap_or(0),
                     }),
                     None => None,
                 })
@@ -311,8 +325,12 @@ impl Store {
                 country: row.get(3)?,
                 created_at: row.get(4)?,
                 latest: check(5)?,
-                previous: check(8)?,
-                popularity: row.get::<_, Option<i64>>(11)?.map(|p| p.clamp(0, 100) as u8),
+                previous: check(9)?,
+                popularity: row.get::<_, Option<i64>>(13)?.map(|p| p.clamp(0, 100) as u8),
+                top_apps: row
+                    .get::<_, Option<String>>(14)?
+                    .and_then(|json| serde_json::from_str(&json).ok())
+                    .unwrap_or_default(),
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
@@ -321,15 +339,10 @@ impl Store {
     // Rank history
 
     pub fn record_snapshot(&self, snapshot: &Snapshot) -> Result<()> {
-        let top = snapshot
-            .top_app_ids
-            .iter()
-            .map(u64::to_string)
-            .collect::<Vec<_>>()
-            .join(",");
+        let top = serde_json::to_string(&snapshot.top_apps).unwrap_or_else(|_| "[]".into());
         self.conn().execute(
             "INSERT INTO rank_snapshots (keyword_id, checked_at, rank, results_count, difficulty,
-                                         source, top_app_ids)
+                                         source, top_apps)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
                 snapshot.keyword_id,
@@ -348,7 +361,7 @@ impl Store {
     pub fn rank_history(&self, keyword_id: KeywordId, limit: usize) -> Result<Vec<Snapshot>> {
         let conn = self.conn();
         let mut statement = conn.prepare(
-            "SELECT keyword_id, checked_at, rank, results_count, difficulty, source, top_app_ids
+            "SELECT keyword_id, checked_at, rank, results_count, difficulty, source, top_apps
              FROM rank_snapshots WHERE keyword_id = ?1
              ORDER BY checked_at DESC, id DESC LIMIT ?2",
         )?;
@@ -361,7 +374,7 @@ impl Store {
                 results_count: row.get(3)?,
                 difficulty: row.get::<_, Option<f64>>(4)?.map(|d| d as f32),
                 source: row.get(5)?,
-                top_app_ids: top.split(',').filter_map(|id| id.parse().ok()).collect(),
+                top_apps: serde_json::from_str(&top).unwrap_or_default(),
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
