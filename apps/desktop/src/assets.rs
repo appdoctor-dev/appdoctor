@@ -14,6 +14,7 @@ macro_rules! extra_icons {
 static EXTRA: &[(&str, &[u8])] = extra_icons![
     "chart-line",
     "clapperboard",
+    "gauge",
     "image",
     "key-round",
     "languages",

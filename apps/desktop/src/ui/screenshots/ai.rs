@@ -17,6 +17,7 @@ use appdoctor_screenshots::Target;
 use futures::StreamExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
+use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::{ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -27,6 +28,8 @@ use super::view::AI_PANEL;
 use crate::state::AppState;
 
 const PROVIDER: &str = "ai_provider";
+/// Project folders used lately, newest first, one per line.
+const RECENT_PROJECTS: &str = "ai_recent_projects";
 /// Before models could be chosen for every provider, Ollama's was here.
 const OLD_OLLAMA_MODEL: &str = "ai_model";
 /// Steps shown before older ones fold away.
@@ -416,8 +419,6 @@ pub(super) struct AiPanel {
     /// The chosen model's id and effort; unset uses the provider's default.
     model: Option<String>,
     effort: Option<String>,
-    /// The model and effort choices are open.
-    picking: bool,
     prompt: Entity<TextareaState>,
     running: bool,
     cancel: Arc<AtomicBool>,
@@ -467,7 +468,6 @@ impl AiPanel {
             provider: None,
             model: None,
             effort: None,
-            picking: false,
             prompt,
             running: false,
             cancel: Arc::new(AtomicBool::new(false)),
@@ -600,9 +600,34 @@ impl AiPanel {
         if let Some(key) = self.project_key(cx) {
             self.save(&key, &folder.map(|f| f.display().to_string()).unwrap_or_default(), cx);
         }
+        if let Some(folder) = folder {
+            let mut recent = vec![folder.to_path_buf()];
+            recent.extend(self.recent_projects(cx).into_iter().filter(|path| path != folder).take(5));
+            let lines: Vec<String> = recent.iter().map(|path| path.display().to_string()).collect();
+            self.save(RECENT_PROJECTS, &lines.join("\n"), cx);
+        }
         // A conversation that started without the code can't see it.
         self.session = None;
         cx.notify();
+    }
+
+    /// Project folders used lately that still exist.
+    fn recent_projects(&self, cx: &App) -> Vec<PathBuf> {
+        self.setting(RECENT_PROJECTS, cx)
+            .unwrap_or_default()
+            .lines()
+            .map(PathBuf::from)
+            .filter(|path| path.is_dir())
+            .collect()
+    }
+
+    /// A folder that looks like this app's code, when it has none yet.
+    fn suggested_project(&self, cx: &App) -> Option<PathBuf> {
+        let app = self.app(cx).map(|(id, _)| id);
+        self.suggestion
+            .as_ref()
+            .filter(|(id, _)| Some(*id) == app)
+            .map(|(_, folder)| folder.clone())
     }
 
     fn choose_project(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -919,44 +944,10 @@ impl AiPanel {
         moving
     }
 
-    fn header(&self, dark: bool, cx: &mut Context<Self>) -> Div {
+    fn header(&self, cx: &mut Context<Self>) -> Div {
         let theme = cx.theme().clone();
         let running = self.running;
-        let providers = h_flex().flex_wrap().gap(px(6.)).children(self.found.iter().map(|found| {
-            let provider = found.provider;
-            let chosen = self.provider == Some(provider);
-            h_flex()
-                .id(SharedString::from(format!("ai-provider-{}", provider.slug())))
-                .gap(px(6.))
-                .pl(px(7.))
-                .pr(px(10.))
-                .py(px(5.))
-                .rounded(px(8.))
-                .border_1()
-                .text_size(px(12.))
-                .map(|this| {
-                    if chosen {
-                        this.border_color(theme.primary).bg(theme.primary.opacity(0.1))
-                    } else {
-                        this.border_color(theme.foreground.opacity(0.08))
-                            .when(!running, |this| this.hover(|style| style.bg(theme.foreground.opacity(0.06))))
-                    }
-                })
-                .when(!running, |this| this.cursor_pointer())
-                .child(logo(provider, dark, 14.))
-                .child(provider.label())
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    if this.running || this.provider == Some(provider) {
-                        return;
-                    }
-                    this.provider = Some(provider);
-                    this.save(PROVIDER, provider.slug(), cx);
-                    this.load_choices(cx);
-                    cx.notify();
-                }))
-        }));
-        let selected = self.found();
-
+        let problem = self.found().and_then(|f| f.problem.clone());
         v_flex()
             .px(px(12.))
             .pt(px(12.))
@@ -998,216 +989,190 @@ impl AiPanel {
                      or Ollama, then look again.",
                 ))
             })
-            .child(providers)
-            .when_some(selected.and_then(|f| f.problem.clone()), |this, problem| {
+            .when_some(problem, |this, problem| {
                 this.child(div().text_size(px(11.5)).text_color(theme.warning).child(problem))
             })
-            .when(selected.is_some_and(|f| !f.models.is_empty()), |this| this.child(self.choices(cx)))
-            .child(self.project_row(cx))
     }
 
-    /// The model and effort: one line saying which, which opens to choose.
-    fn choices(&self, cx: &mut Context<Self>) -> Div {
-        let theme = cx.theme().clone();
-        let Some(found) = self.found().cloned() else {
-            return div();
-        };
-        let default_label = match &found.default_model {
-            Some(model) => format!("Default ({})", model.label),
-            None => "Default".to_owned(),
-        };
-        let model_label = self.chosen_model().map_or_else(
-            || found.default_model.as_ref().map_or_else(|| "Default model".to_owned(), |m| m.label.clone()),
-            |model| model.label.clone(),
-        );
-        let efforts = self.efforts();
-        let summary = match (&self.effort, efforts.is_empty()) {
-            (Some(effort), false) => format!("{model_label} · {} effort", effort_label(effort)),
-            (None, false) => format!("{model_label} · default effort"),
-            _ => model_label,
-        };
-        let picking = self.picking;
-        let chip = |id: SharedString, label: String, chosen: bool| {
-            div()
-                .id(id)
-                .px(px(8.))
-                .py(px(3.))
-                .rounded(px(6.))
-                .text_size(px(11.5))
-                .cursor_pointer()
-                .border_1()
-                .map(|this| {
-                    if chosen {
-                        this.border_color(theme.primary).bg(theme.primary.opacity(0.1))
-                    } else {
-                        this.border_color(theme.foreground.opacity(0.1))
-                            .hover(|style| style.bg(theme.foreground.opacity(0.06)))
-                    }
-                })
-                .child(label)
-        };
-        let label = |text: &'static str| {
-            div()
-                .text_size(px(11.))
-                .text_color(theme.muted_foreground)
-                .child(text)
-        };
-
-        let mut models = h_flex().flex_wrap().gap(px(5.));
-        if found.provider != Provider::Ollama {
-            models = models.child(chip("ai-model-default".into(), default_label, self.model.is_none()).on_click(
-                cx.listener(|this, _, _, cx| this.choose_model(None, cx)),
-            ));
+    /// Switches to `provider` (with its saved effort) and `model`.
+    fn choose(&mut self, provider: Provider, model: Option<String>, cx: &mut Context<Self>) {
+        if self.running {
+            return;
         }
-        models = models.children(found.models.iter().map(|model| {
-            let id = model.id.clone();
-            chip(
-                SharedString::from(format!("ai-model-{id}")),
-                model.label.clone(),
-                self.model.as_deref() == Some(id.as_str()),
-            )
-            .on_click(cx.listener(move |this, _, _, cx| this.choose_model(Some(id.clone()), cx)))
-        }));
-        let mut effort_chips = h_flex()
-            .flex_wrap()
-            .gap(px(5.))
-            .child(chip("ai-effort-default".into(), "Default".into(), self.effort.is_none()).on_click(
-                cx.listener(|this, _, _, cx| this.choose_effort(None, cx)),
-            ));
-        effort_chips = effort_chips.children(efforts.iter().map(|effort| {
-            let value = effort.clone();
-            chip(
-                SharedString::from(format!("ai-effort-{effort}")),
-                effort_label(effort),
-                self.effort.as_deref() == Some(effort.as_str()),
-            )
-            .on_click(cx.listener(move |this, _, _, cx| this.choose_effort(Some(value.clone()), cx)))
-        }));
+        if self.provider != Some(provider) {
+            self.provider = Some(provider);
+            self.save(PROVIDER, provider.slug(), cx);
+            self.load_choices(cx);
+        }
+        self.choose_model(model, cx);
+    }
 
-        v_flex()
-            .gap(px(7.))
+    /// Which AI and model: a pop-up menu, by provider, with the current one
+    /// ticked.
+    fn model_menu(&self, dark: bool, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let theme = cx.theme().clone();
+        let panel = cx.entity().downgrade();
+        let found = self.found.clone();
+        let current = (self.provider, self.model.clone());
+        let title = match (self.chosen_model(), self.found()) {
+            (Some(model), _) => model.label.clone(),
+            (None, Some(found)) => found
+                .default_model
+                .as_ref()
+                .map_or_else(|| found.provider.label().to_owned(), |model| model.label.clone()),
+            (None, None) => "Choose an AI".to_owned(),
+        };
+        Button::new("ai-model-menu")
+            .ghost()
+            .xsmall()
+            .dropdown_caret(true)
+            .disabled(self.running || self.found.is_empty())
+            .tooltip("Which AI does the work")
             .child(
                 h_flex()
-                    .id("ai-choices")
-                    .gap(px(6.))
-                    .px(px(8.))
-                    .py(px(5.))
-                    .rounded(px(7.))
-                    .text_size(px(12.))
-                    .text_color(theme.muted_foreground)
-                    .cursor_pointer()
-                    .hover(|style| style.bg(theme.foreground.opacity(0.05)).text_color(theme.foreground))
-                    .child(Icon::new(IconName::Settings2).size(px(13.)))
-                    .child(div().flex_1().min_w_0().truncate().child(summary))
-                    .child(Icon::new(if picking { IconName::ChevronUp } else { IconName::ChevronDown }).size(px(13.)))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.picking = !this.picking;
-                        cx.notify();
-                    })),
+                    .gap(px(5.))
+                    .items_center()
+                    .when_some(self.provider, |this, provider| this.child(logo(provider, dark, 13.)))
+                    .child(div().max_w(px(100.)).truncate().text_color(theme.foreground).child(title)),
             )
-            .when(picking, |this| {
-                this.child(
-                    v_flex()
-                        .gap(px(6.))
-                        .px(px(8.))
-                        .pb(px(2.))
-                        .child(label("Model"))
-                        .child(models)
-                        .when(!efforts.is_empty(), |this| {
-                            this.child(label("Effort: how hard it thinks").pt(px(3.))).child(effort_chips)
-                        }),
-                )
+            .dropdown_menu_with_anchor(Anchor::BottomLeft, move |mut menu, _, _| {
+                menu = menu.min_w(px(220.)).max_h(px(440.)).scrollable(true);
+                for (ix, found) in found.iter().enumerate() {
+                    let provider = found.provider;
+                    if ix > 0 {
+                        menu = menu.separator();
+                    }
+                    menu = menu.label(provider.label());
+                    if let Some(problem) = &found.problem {
+                        menu = menu.item(PopupMenuItem::new(problem.clone()).disabled(true));
+                        continue;
+                    }
+                    let mut choices: Vec<(Option<String>, String)> = Vec::new();
+                    if provider != Provider::Ollama {
+                        let default = found
+                            .default_model
+                            .as_ref()
+                            .map_or_else(|| "Default".to_owned(), |model| format!("Default ({})", model.label));
+                        choices.push((None, default));
+                    }
+                    choices.extend(found.models.iter().map(|model| (Some(model.id.clone()), model.label.clone())));
+                    for (model, label) in choices {
+                        let checked = current.0 == Some(provider) && current.1 == model;
+                        let panel = panel.clone();
+                        menu = menu.item(PopupMenuItem::new(label).checked(checked).on_click(move |_, _, cx| {
+                            panel.update(cx, |this, cx| this.choose(provider, model.clone(), cx)).ok();
+                        }));
+                    }
+                }
+                menu
             })
     }
 
-    /// The app's code folder: which one, or a way to choose it.
-    fn project_row(&self, cx: &mut Context<Self>) -> Div {
-        let theme = cx.theme().clone();
-        let app = self.app(cx).map(|(id, _)| id);
-        let card = h_flex()
-            .gap(px(8.))
-            .px(px(9.))
-            .py(px(7.))
-            .rounded(px(9.))
-            .bg(theme.foreground.opacity(0.04));
-        if let Some(project) = self.project(cx) {
-            let name = project
-                .file_name()
-                .map_or_else(|| project.display().to_string(), |n| n.to_string_lossy().into_owned());
-            return card
-                .items_center()
-                .child(Icon::new(IconName::FolderOpen).size(px(15.)).text_color(theme.primary))
-                .child(
-                    v_flex()
-                        .flex_1()
-                        .min_w_0()
-                        .child(div().text_size(px(12.5)).font_weight(FontWeight::MEDIUM).truncate().child(name))
-                        .child(
-                            div()
-                                .text_size(px(11.))
-                                .text_color(theme.muted_foreground)
-                                .truncate()
-                                .child(format!("Reads your code in {}", tilde(&project))),
-                        ),
-                )
-                .child(
-                    Button::new("ai-project")
-                        .ghost()
-                        .xsmall()
-                        .label("Change")
-                        .on_click(cx.listener(|this, _, window, cx| this.choose_project(window, cx))),
-                )
-                .child(
-                    Button::new("ai-project-off")
-                        .ghost()
-                        .xsmall()
-                        .icon(IconName::Close)
-                        .tooltip("Stop sharing the code")
-                        .on_click(cx.listener(|this, _, _, cx| this.set_project(None, cx))),
-                );
+    /// How hard it thinks: a pop-up menu, for models that take a choice.
+    fn effort_menu(&self, cx: &mut Context<Self>) -> Option<impl IntoElement + use<>> {
+        let efforts = self.efforts();
+        if efforts.is_empty() {
+            return None;
         }
-        let suggestion = self
-            .suggestion
+        let theme = cx.theme().clone();
+        let panel = cx.entity().downgrade();
+        let current = self.effort.clone();
+        let title = self.effort.as_deref().map_or_else(|| "Effort".to_owned(), effort_label);
+        Some(
+            Button::new("ai-effort-menu")
+                .ghost()
+                .xsmall()
+                .dropdown_caret(true)
+                .disabled(self.running)
+                .tooltip("Effort: how hard it thinks. More is slower but more careful.")
+                .child(
+                    h_flex()
+                        .gap(px(4.))
+                        .items_center()
+                        .text_color(theme.muted_foreground)
+                        .child(Icon::new(gpui_kit::assets::IconName::Gauge).size(px(13.)))
+                        .child(title),
+                )
+                .dropdown_menu_with_anchor(Anchor::BottomLeft, move |mut menu, _, _| {
+                    menu = menu.min_w(px(170.)).label("Effort");
+                    let choices = std::iter::once(None).chain(efforts.iter().cloned().map(Some));
+                    for effort in choices {
+                        let label = effort.as_deref().map_or_else(|| "Default".to_owned(), effort_label);
+                        let checked = current == effort;
+                        let panel = panel.clone();
+                        menu = menu.item(PopupMenuItem::new(label).checked(checked).on_click(move |_, _, cx| {
+                            panel.update(cx, |this, cx| this.choose_effort(effort.clone(), cx)).ok();
+                        }));
+                    }
+                    menu
+                }),
+        )
+    }
+
+    /// The app's code folder: a pop-up menu of recent ones, the one that
+    /// looks like the app's, or another.
+    fn project_menu(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let theme = cx.theme().clone();
+        let panel = cx.entity().downgrade();
+        let project = self.project(cx);
+        let mut folders: Vec<PathBuf> = project.iter().cloned().collect();
+        for folder in self.suggested_project(cx).into_iter().chain(self.recent_projects(cx)) {
+            if !folders.contains(&folder) {
+                folders.push(folder);
+            }
+        }
+        let name = project
             .as_ref()
-            .filter(|(id, _)| Some(*id) == app)
-            .map(|(_, folder)| folder.clone());
-        let prompt = match &suggestion {
-            Some(folder) => format!("Is your app's code in {}? Sharing it shows the AI what your app does.", tilde(folder)),
-            None => "Choose your app's project folder so the AI knows what your app does.".to_owned(),
-        };
-        card.items_start()
+            .and_then(|path| path.file_name())
+            .map(|name| name.to_string_lossy().into_owned());
+        let shared = name.is_some();
+        Button::new("ai-project-menu")
+            .ghost()
+            .xsmall()
+            .dropdown_caret(true)
+            .disabled(self.running)
+            .tooltip(match &project {
+                Some(path) => format!("The AI reads your app's code in {}", tilde(path)),
+                None => "Choose your app's project folder, so the AI knows what your app does".to_owned(),
+            })
             .child(
-                Icon::new(IconName::Folder)
-                    .size(px(15.))
-                    .mt(px(1.))
-                    .text_color(theme.muted_foreground),
-            )
-            .child(
-                v_flex()
-                    .flex_1()
-                    .min_w_0()
-                    .gap(px(6.))
-                    .child(div().text_size(px(11.5)).text_color(theme.muted_foreground).child(prompt))
+                h_flex()
+                    .gap(px(5.))
+                    .items_center()
                     .child(
-                        h_flex()
-                            .gap(px(6.))
-                            .when_some(suggestion, |this, folder| {
-                                this.child(
-                                    Button::new("ai-project-use")
-                                        .primary()
-                                        .xsmall()
-                                        .label("Use it")
-                                        .on_click(cx.listener(move |this, _, _, cx| this.set_project(Some(&folder), cx))),
-                                )
-                            })
-                            .child(
-                                Button::new("ai-project")
-                                    .xsmall()
-                                    .label("Choose folder…")
-                                    .on_click(cx.listener(|this, _, window, cx| this.choose_project(window, cx))),
-                            ),
+                        Icon::new(if shared { IconName::FolderOpen } else { IconName::Folder })
+                            .size(px(13.))
+                            .text_color(if shared { theme.primary } else { theme.muted_foreground }),
+                    )
+                    .child(
+                        div()
+                            .max_w(px(90.))
+                            .truncate()
+                            .text_color(if shared { theme.foreground } else { theme.muted_foreground })
+                            .child(name.unwrap_or_else(|| "Project".to_owned())),
                     ),
             )
+            .dropdown_menu_with_anchor(Anchor::BottomLeft, move |mut menu, _, _| {
+                menu = menu.min_w(px(240.)).label("Project folder");
+                for folder in &folders {
+                    let checked = project.as_ref() == Some(folder);
+                    let (panel, folder) = (panel.clone(), folder.clone());
+                    menu = menu.item(PopupMenuItem::new(tilde(&folder)).checked(checked).on_click(move |_, _, cx| {
+                        panel.update(cx, |this, cx| this.set_project(Some(&folder), cx)).ok();
+                    }));
+                }
+                if !folders.is_empty() {
+                    menu = menu.separator();
+                }
+                let chooser = panel.clone();
+                menu = menu.item(PopupMenuItem::new("Choose folder…").on_click(move |_, window, cx| {
+                    chooser.update(cx, |this, cx| this.choose_project(window, cx)).ok();
+                }));
+                let panel = panel.clone();
+                menu.item(PopupMenuItem::new("Don't share code").checked(project.is_none()).on_click(move |_, _, cx| {
+                    panel.update(cx, |this, cx| this.set_project(None, cx)).ok();
+                }))
+            })
     }
 
     fn step_row(&self, index: usize, step: &Step, cx: &App) -> Div {
@@ -1393,6 +1358,35 @@ impl AiPanel {
                 "Your own AI designs here with AppDoctor's tools. You'll see each change on the canvas as it's \
                  made, and ⌘Z undoes it.",
             ))
+            .when_some(
+                self.suggested_project(cx).filter(|_| self.project(cx).is_none()),
+                |this, folder| {
+                    this.child(
+                        h_flex()
+                            .gap(px(8.))
+                            .px(px(10.))
+                            .py(px(8.))
+                            .mb(px(6.))
+                            .rounded(px(9.))
+                            .bg(theme.primary.opacity(0.08))
+                            .child(Icon::new(IconName::Folder).size(px(14.)).text_color(theme.primary))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .text_size(px(12.))
+                                    .child(format!("Your app's code looks to be in {}.", tilde(&folder))),
+                            )
+                            .child(
+                                Button::new("ai-project-use")
+                                    .primary()
+                                    .xsmall()
+                                    .label("Use it")
+                                    .on_click(cx.listener(move |this, _, _, cx| this.set_project(Some(&folder), cx))),
+                            ),
+                    )
+                },
+            )
             .child(div().text_size(px(12.)).font_weight(FontWeight::MEDIUM).child("Try"))
             .children(self.suggestions(cx).iter().enumerate().map(|(ix, text)| {
                 h_flex()
@@ -1420,7 +1414,7 @@ impl AiPanel {
             }))
     }
 
-    fn composer(&self, cx: &mut Context<Self>) -> Div {
+    fn composer(&self, dark: bool, cx: &mut Context<Self>) -> Div {
         let theme = cx.theme().clone();
         let action = if self.running {
             Button::new("ai-stop")
@@ -1456,12 +1450,13 @@ impl AiPanel {
                     .child(div().text_size(px(13.)).child(Textarea::new(&self.prompt).appearance(false)))
                     .child(
                         h_flex()
-                            .px(px(6.))
-                            .justify_between()
+                            .px(px(2.))
+                            .gap(px(2.))
                             .items_center()
-                            .child(div().text_size(px(10.5)).text_color(theme.muted_foreground).child(
-                                if self.running { "Working: watch the canvas" } else { "⇧↩ for a new line" },
-                            ))
+                            .child(self.project_menu(cx))
+                            .child(self.model_menu(dark, cx))
+                            .children(self.effort_menu(cx))
+                            .child(div().flex_1())
                             .child(action),
                     ),
             )
@@ -1509,7 +1504,7 @@ impl Render for AiPanel {
             .bg(theme.sidebar)
             .border_l_1()
             .border_color(theme.border)
-            .child(self.header(dark, cx))
+            .child(self.header(cx))
             .child(
                 div()
                     .id("ai-chat")
@@ -1529,6 +1524,6 @@ impl Render for AiPanel {
                     }))
                     .child(div().px(px(12.)).pt(px(12.)).pb(px(16.)).child(body)),
             )
-            .child(self.composer(cx))
+            .child(self.composer(dark, cx))
     }
 }

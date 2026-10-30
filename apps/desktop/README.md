@@ -133,18 +133,23 @@ uses the AI you already have, so there's no second subscription.
   ChatGPT app and its editor extension), Gemini CLI and Ollama with its
   models, each shown with its own mark (`assets/logos`, sources in
   `SOURCES.md`).
-- *Model and effort*: a line under the providers opens to choose. Claude
-  Code offers Fable, Opus, Sonnet and Haiku with effort from Low to Max
-  (`--model`, `--effort`). Codex offers the models in its own list
-  (`~/.codex/models_cache.json`) with each one's effort levels (`-m`,
-  `model_reasoning_effort`). Gemini CLI offers Pro, Flash and Flash-Lite,
-  and Ollama its downloaded models. *Default* leaves the tool's own setting.
-  Choices are saved per provider.
-- *Project folder*: share the folder with the app's code and the AI reads it
-  (and runs in it, so the project's CLAUDE.md or AGENTS.md applies). For an
-  app without one, AppDoctor looks in the usual places (~/Apps, ~/Developer,
-  ~/Projects and so on) for a folder named after the app or its bundle ID and
-  offers it.
+- Under the message box, three pop-up menus set up the run, as in Claude
+  Code: the project folder, the AI and its model, and the effort.
+  - *Project folder* (folder icon): recent folders, the one AppDoctor found,
+    *Choose folder…* or *Don't share code*. The AI reads the code there and
+    runs in it, so the project's CLAUDE.md or AGENTS.md applies. For an app
+    without one, AppDoctor looks in the usual places (~/Apps, ~/Developer,
+    ~/Projects and so on) for a folder named after the app or its bundle ID
+    and offers it.
+  - *AI and model*: one menu, by provider, with the current one ticked.
+    Claude Code offers Fable, Opus, Sonnet and Haiku (`--model`); Codex the
+    models in its own list (`~/.codex/models_cache.json`, `-m`); Gemini CLI
+    Pro, Flash and Flash-Lite; Ollama its downloaded models. *Default*
+    leaves the tool's own setting.
+  - *Effort* (gauge icon), for models that take one: Claude Code from Low to
+    Max (`--effort`), Codex each model's own levels
+    (`model_reasoning_effort`).
+  - Choices are saved per provider.
 - You type a request (Enter sends, ⇧Enter adds a line) or pick a
   suggestion. Follow-ups carry on the same conversation: Claude Code and
   Codex resume their own session; Gemini CLI and Ollama get the earlier
