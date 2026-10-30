@@ -16,7 +16,6 @@ use gpui_kit::*;
 
 use super::{DragMode, ScreenshotsView};
 use crate::theme::meter;
-use crate::ui::controls::Segmented;
 use crate::ui::widgets::{self, status_dot};
 
 const LEFT_PANEL: f32 = 240.;
@@ -56,8 +55,8 @@ pub(super) fn layer_icon(layer: &Layer) -> Icon {
     match layer.kind {
         LayerKind::Text { .. } => Icon::new(gpui_kit::assets::IconName::Type),
         LayerKind::Device { model, .. } => Icon::new(match model.target() {
-            Target::Iphone => gpui_kit::assets::IconName::Smartphone,
             Target::Ipad => gpui_kit::assets::IconName::Tablet,
+            _ => gpui_kit::assets::IconName::Smartphone,
         }),
         LayerKind::Image { .. } => Icon::new(gpui_kit::assets::IconName::Image),
         LayerKind::Shape { .. } => Icon::new(IconName::Square),
@@ -169,6 +168,9 @@ fn layer_visual(layer: &Layer, s: f32, folder: &Path) -> AnyElement {
                     .child(part(g.glass, g.glass_radius).bg(glass))
                 })
                 .child(screen)
+                .when_some(g.crease, |this, crease| {
+                    this.child(part(crease, 0.).bg(hsla(0., 0., 0., 0.22)))
+                })
                 .when_some(g.island, |this, island| {
                     this.child(part(island, island.height / 2.).bg(rgb(0x000000)))
                 })
@@ -224,8 +226,11 @@ impl ScreenshotsView {
         let panels = if self.left_open { LEFT_PANEL } else { 0. } + if self.right_open { RIGHT_PANEL } else { 0. };
         let available_w = f32::from(viewport.width) - SIDEBAR - panels - 120.;
         let (width, height) = self.target.canvas();
+        // Screenshots leave room to glimpse their neighbours; header and
+        // search art fit whole.
+        let overflow = if self.target.is_screenshot() { 1.6 } else { 1.15 };
         let fit = (available_h / height)
-            .min(available_w / width * 1.6)
+            .min(available_w / width * overflow)
             .clamp(0.05, 0.4);
         fit * self.zoom
     }
@@ -235,7 +240,11 @@ impl ScreenshotsView {
         // Own layers plus the parts of neighbours' layers that span onto
         // this slide; the slide clips them at its edges, like the export.
         let (canvas_width, canvas_height) = self.target.canvas();
-        let visible = visible_layers(&self.design.slides, index, canvas_width);
+        let visible = if self.target.is_screenshot() {
+            visible_layers(&self.design.slides, index, canvas_width)
+        } else {
+            slide.layers.iter().filter(|l| !l.hidden).map(|l| (index, l.clone())).collect()
+        };
         let layers: Vec<AnyElement> = visible
             .iter()
             .map(|(owner, layer)| {
@@ -281,7 +290,12 @@ impl ScreenshotsView {
 
         // Slides sit edge to edge, as the export cuts them, so a layer
         // spanning two keeps its true width; only the strip's ends round.
-        let (first, last) = (index == 0, index + 1 == self.design.slides.len());
+        // Header and search versions stand apart, each fully rounded.
+        let strip = self.target.is_screenshot();
+        let (first, last) = (
+            index == 0 || !strip,
+            index + 1 == self.design.slides.len() || !strip,
+        );
         let canvas = div()
             .id(("slide-canvas", index))
             .relative()
@@ -391,6 +405,20 @@ impl ScreenshotsView {
                                     this.select(None, window, cx);
                                 }),
                             )
+                            .children(self.target.safe_inset().map(|(inset_x, inset_y)| {
+                                // Keep words and faces inside: the App Store
+                                // crops the rest on some devices.
+                                div()
+                                    .absolute()
+                                    .left(px(canvas_width * inset_x * s))
+                                    .top(px(canvas_height * inset_y * s))
+                                    .w(px(canvas_width * (1. - 2. * inset_x) * s))
+                                    .h(px(canvas_height * (1. - 2. * inset_y) * s))
+                                    .rounded(px(4.))
+                                    .border_1()
+                                    .border_dashed()
+                                    .border_color(hsla(0., 0., 1., 0.6))
+                            }))
                             .children(guides),
                     )
                     .children(hover_outline)
@@ -577,10 +605,14 @@ impl ScreenshotsView {
             .child(self.tool(
                 "tool-device",
                 match self.target {
-                    Target::Iphone => gpui_kit::assets::IconName::Smartphone,
                     Target::Ipad => gpui_kit::assets::IconName::Tablet,
+                    _ => gpui_kit::assets::IconName::Smartphone,
                 },
-                self.target.label(),
+                match self.target {
+                    Target::Iphone => "iPhone",
+                    Target::Ipad => "iPad",
+                    _ => "Device",
+                },
                 true,
                 cx,
                 Self::add_device,
@@ -655,6 +687,13 @@ impl ScreenshotsView {
     fn left_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
         let hover = theme.foreground.opacity(0.05);
+        // Thumbnails keep the canvas's shape inside a 76 × 68 box.
+        let (canvas_width, canvas_height) = self.target.canvas();
+        let (thumb_w, thumb_h) = if canvas_height >= canvas_width {
+            (68. * canvas_width / canvas_height, 68.)
+        } else {
+            (76., 76. * canvas_height / canvas_width)
+        };
         let slides = self.design.slides.iter().enumerate().map(|(ix, slide)| {
             let active = ix == self.slide;
             let thumb = self.thumbs.get(ix).cloned().flatten();
@@ -680,8 +719,8 @@ impl ScreenshotsView {
                 )
                 .child(
                     div()
-                        .w(px(32.))
-                        .h(px(68.))
+                        .w(px(thumb_w))
+                        .h(px(thumb_h))
                         .flex_shrink_0()
                         .rounded(px(7.))
                         .p(px(2.))
@@ -704,7 +743,7 @@ impl ScreenshotsView {
                             div()
                                 .text_size(px(13.))
                                 .font_weight(FontWeight::MEDIUM)
-                                .child(format!("Screenshot {}", ix + 1)),
+                                .child(format!("{} {}", self.slide_noun(), ix + 1)),
                         )
                         .child(
                             div()
@@ -798,7 +837,7 @@ impl ScreenshotsView {
             .border_r_1()
             .border_color(theme.border)
             .child(
-                Self::panel_heading("Screenshots")
+                Self::panel_heading(if self.target.is_screenshot() { "Screenshots" } else { "Versions" })
                     .child(
                         small("duplicate-slide", Icon::new(IconName::Copy), "Duplicate screenshot")
                             .on_click(cx.listener(|this, _, window, cx| this.add_slide(true, window, cx))),
@@ -829,7 +868,7 @@ impl ScreenshotsView {
                         .text_size(px(11.))
                         .font_weight(FontWeight::NORMAL)
                         .text_color(theme.muted_foreground)
-                        .child(format!("Screenshot {}", self.slide + 1)),
+                        .child(format!("{} {}", self.slide_noun(), self.slide + 1)),
                 ),
             )
             .child(
@@ -869,34 +908,21 @@ impl Render for ScreenshotsView {
             .border_color(theme.border)
             .child(
                 v_flex()
-                    .child(div().text_base().font_weight(FontWeight::SEMIBOLD).child("Screenshots"))
-                    .child(div().text_xs().text_color(theme.muted_foreground).child(format!(
-                        "{} · {} screenshot{}",
-                        app.name,
-                        self.design.slides.len(),
-                        if self.design.slides.len() == 1 { "" } else { "s" }
-                    ))),
-            )
-            .child(div().flex_1())
-            .child(
-                Segmented::new("design-target", 150.)
-                    .item(
-                        h_flex()
-                            .gap_1()
-                            .child(Icon::new(gpui_kit::assets::IconName::Smartphone).size(px(13.)))
-                            .child("iPhone"),
-                        "iPhone screenshots",
-                    )
-                    .item(
-                        h_flex()
-                            .gap_1()
-                            .child(Icon::new(gpui_kit::assets::IconName::Tablet).size(px(13.)))
-                            .child("iPad"),
-                        "iPad screenshots",
-                    )
-                    .selected(Target::ALL.iter().position(|t| *t == self.target).unwrap_or(0))
-                    .on_select(cx.listener(|this, ix: &usize, window, cx| {
-                        this.set_target(Target::ALL[*ix], window, cx)
+                    .child(div().text_base().font_weight(FontWeight::SEMIBOLD).child(match self.target {
+                        Target::Iphone => "iPhone screenshots",
+                        Target::Ipad => "iPad screenshots",
+                        Target::Header => "Product page header",
+                        Target::Search => "Search result",
+                    }))
+                    .child(div().text_xs().text_color(theme.muted_foreground).child({
+                        let count = self.design.slides.len();
+                        let noun = self.slide_noun().to_lowercase();
+                        let (w, h) = self.target.sizes()[0].pixels();
+                        format!(
+                            "{} · {count} {noun}{} · {w} × {h}",
+                            app.name,
+                            if count == 1 { "" } else { "s" }
+                        )
                     })),
             )
             .child(div().flex_1())
@@ -1014,7 +1040,12 @@ impl Render for ScreenshotsView {
                     .children(
                         slides
                             .into_iter()
-                            .map(|slide| div().flex_shrink_0().child(slide)),
+                            .map(|slide| {
+                                div()
+                                    .flex_shrink_0()
+                                    .when(!self.target.is_screenshot(), |this| this.mx(px(18.)))
+                                    .child(slide)
+                            }),
                     )
                     .child(div().flex_1().flex_shrink_0().min_w(px(40.)).h(px(1.))),
             )

@@ -1,157 +1,275 @@
-//! Device frames: the models a screenshot can sit in, their finishes, and
-//! where each part goes. The editor's canvas and the SVG export both draw
-//! from [`device_geometry`], so they agree.
+//! Device frames: every iPhone and iPad a screenshot can sit in, their
+//! finishes, and where each part goes. The editor's canvas and the SVG
+//! export both draw from [`device_geometry`], so they agree.
 //!
-//! Every frame is drawn from proportions (no Apple artwork), so they can
-//! ship with the app.
+//! Each model is drawn from Apple's published measurements (body size in
+//! millimetres, screen resolution and pixel density, screen corner radius
+//! in points), not from Apple artwork, so the frames can ship with the app.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::{Layer, Rect, Target};
 
-/// The shape of a device.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum DeviceModel {
-    /// iPhone 14 Pro and later: thin bezels and the Dynamic Island.
-    #[default]
-    IphoneIsland,
-    /// iPhone X to 14: the notch.
-    IphoneNotch,
-    /// iPhone SE and 8: a home button below a 16:9 screen.
-    IphoneClassic,
-    /// iPad Pro and Air: even, thin bezels.
-    IpadPro,
-    /// iPad with a home button.
-    IpadClassic,
+/// What sits in the glass above the screen.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Cutout {
+    /// The Dynamic Island.
+    Island,
+    /// A notch this many millimetres wide.
+    Notch(f32),
+    /// A round camera hole in the screen (iPhone Duo).
+    Punch,
+    /// A camera in the bezel: above the screen, or (iPads whose camera
+    /// sits on the long edge) beside it.
+    Camera { side: bool },
+    /// A home button below the screen and a camera above it.
+    Home,
 }
 
-/// A model's proportions, as shares of the body's width.
+/// Where the side buttons go.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Buttons {
+    Iphone,
+    IphoneClassic,
+    Ipad,
+}
+
+/// One model's measurements.
+#[derive(Debug)]
 struct Spec {
-    /// Screen height / width.
-    screen_aspect: f32,
-    /// The metal band around the front glass.
-    edge: f32,
-    /// Glass between the edge and the screen, on every side.
-    bezel: f32,
-    /// Extra glass above and below the screen, for the home button.
-    chin: f32,
-    body_radius: f32,
-    /// 0 for the square screens of home-button models.
-    screen_radius: f32,
+    slug: &'static str,
+    label: &'static str,
+    target: Target,
+    /// Body width and height in millimetres, as held for the screenshot.
+    body: (f32, f32),
+    /// Screen resolution in pixels, and its pixel density.
+    pixels: (u32, u32),
+    ppi: f32,
+    /// Pixels per point: 3 on most iPhones, 2 on iPads and older ones.
+    scale: f32,
+    /// The screen's corner radius in points; 0 for square screens.
+    radius_pt: f32,
+    cutout: Cutout,
+    buttons: Buttons,
+    /// A foldable's crease down the middle of the screen.
+    crease: bool,
+}
+
+const fn phone(
+    slug: &'static str,
+    label: &'static str,
+    body: (f32, f32),
+    pixels: (u32, u32),
+    ppi: f32,
+    radius_pt: f32,
+    cutout: Cutout,
+) -> Spec {
+    Spec {
+        slug,
+        label,
+        target: Target::Iphone,
+        body,
+        pixels,
+        ppi,
+        scale: 3.,
+        radius_pt,
+        cutout,
+        buttons: Buttons::Iphone,
+        crease: false,
+    }
+}
+
+const fn tablet(
+    slug: &'static str,
+    label: &'static str,
+    body: (f32, f32),
+    pixels: (u32, u32),
+    ppi: f32,
+    radius_pt: f32,
+    cutout: Cutout,
+) -> Spec {
+    Spec {
+        slug,
+        label,
+        target: Target::Ipad,
+        body,
+        pixels,
+        ppi,
+        scale: 2.,
+        radius_pt,
+        cutout,
+        buttons: Buttons::Ipad,
+        crease: false,
+    }
+}
+
+/// Notch widths: iPhone X to 12, then the narrower one from iPhone 13.
+const WIDE_NOTCH: Cutout = Cutout::Notch(34.7);
+const NOTCH: Cutout = Cutout::Notch(27.8);
+const SIDE_CAMERA: Cutout = Cutout::Camera { side: true };
+const TOP_CAMERA: Cutout = Cutout::Camera { side: false };
+
+/// Newest first within each family; the pickers list them in this order.
+static CATALOG: &[Spec] = &[
+    phone("iphone-18-pro-max", "iPhone 18 Pro Max", (78.0, 163.4), (1320, 2868), 460., 62., Cutout::Island),
+    phone("iphone-18-pro", "iPhone 18 Pro", (71.9, 150.0), (1206, 2622), 460., 62., Cutout::Island),
+    Spec {
+        slug: "iphone-duo",
+        label: "iPhone Duo (closed)",
+        ..phone("", "", (84.1, 117.8), (1398, 2034), 460., 55., Cutout::Punch)
+    },
+    Spec {
+        slug: "iphone-duo-open",
+        label: "iPhone Duo (open)",
+        buttons: Buttons::Ipad,
+        crease: true,
+        ..phone("", "", (164.6, 117.8), (2670, 1878), 430., 40., Cutout::Punch)
+    },
+    phone("iphone-air", "iPhone Air", (74.7, 156.2), (1260, 2736), 460., 62., Cutout::Island),
+    phone("iphone-17-pro-max", "iPhone 17 Pro Max", (78.0, 163.4), (1320, 2868), 460., 62., Cutout::Island),
+    phone("iphone-17-pro", "iPhone 17 Pro", (71.9, 150.0), (1206, 2622), 460., 62., Cutout::Island),
+    phone("iphone-17", "iPhone 17", (71.5, 149.6), (1206, 2622), 460., 62., Cutout::Island),
+    phone("iphone-17e", "iPhone 17e", (71.5, 146.7), (1170, 2532), 460., 47.33, NOTCH),
+    phone("iphone-16-pro-max", "iPhone 16 Pro Max", (77.6, 163.0), (1320, 2868), 460., 62., Cutout::Island),
+    phone("iphone-16-pro", "iPhone 16 Pro", (71.5, 149.6), (1206, 2622), 460., 62., Cutout::Island),
+    phone("iphone-16-plus", "iPhone 16 Plus", (77.8, 160.9), (1290, 2796), 460., 55., Cutout::Island),
+    phone("iphone-16", "iPhone 16", (71.6, 147.6), (1179, 2556), 460., 55., Cutout::Island),
+    phone("iphone-16e", "iPhone 16e", (71.5, 146.7), (1170, 2532), 460., 47.33, NOTCH),
+    phone("iphone-15-pro-max", "iPhone 15 Pro Max", (76.7, 159.9), (1290, 2796), 460., 55., Cutout::Island),
+    phone("iphone-15-pro", "iPhone 15 Pro", (70.6, 146.6), (1179, 2556), 460., 55., Cutout::Island),
+    phone("iphone-15-plus", "iPhone 15 Plus", (77.8, 160.9), (1290, 2796), 460., 55., Cutout::Island),
+    phone("iphone-15", "iPhone 15", (71.6, 147.6), (1179, 2556), 460., 55., Cutout::Island),
+    phone("iphone-14-pro-max", "iPhone 14 Pro Max", (77.6, 160.7), (1290, 2796), 460., 55., Cutout::Island),
+    phone("iphone-14-pro", "iPhone 14 Pro", (71.5, 147.5), (1179, 2556), 460., 55., Cutout::Island),
+    phone("iphone-14-plus", "iPhone 14 Plus", (78.1, 160.8), (1284, 2778), 458., 53.33, NOTCH),
+    phone("iphone-14", "iPhone 14", (71.5, 146.7), (1170, 2532), 460., 47.33, NOTCH),
+    phone("iphone-13-mini", "iPhone 13 mini", (64.2, 131.5), (1080, 2340), 476., 44., NOTCH),
+    phone("iphone-12", "iPhone 12", (71.5, 146.7), (1170, 2532), 460., 47.33, WIDE_NOTCH),
+    Spec {
+        scale: 2.,
+        ..phone("iphone-11", "iPhone 11", (75.7, 150.9), (828, 1792), 326., 41.5, WIDE_NOTCH)
+    },
+    phone("iphone-x", "iPhone X and XS", (70.9, 143.6), (1125, 2436), 458., 39., WIDE_NOTCH),
+    Spec {
+        scale: 2.,
+        buttons: Buttons::IphoneClassic,
+        ..phone("iphone-se", "iPhone SE", (67.3, 138.4), (750, 1334), 326., 0., Cutout::Home)
+    },
+    Spec {
+        buttons: Buttons::IphoneClassic,
+        ..phone("iphone-8-plus", "iPhone 8 Plus", (78.1, 158.4), (1080, 1920), 401., 0., Cutout::Home)
+    },
+    tablet("ipad-pro-13", "iPad Pro 13-inch (M4 and later)", (215.5, 281.6), (2064, 2752), 264., 18., SIDE_CAMERA),
+    tablet("ipad-pro-11", "iPad Pro 11-inch (M4 and later)", (177.5, 249.7), (1668, 2420), 264., 18., SIDE_CAMERA),
+    tablet("ipad-air-13", "iPad Air 13-inch", (214.9, 280.6), (2048, 2732), 264., 18., SIDE_CAMERA),
+    tablet("ipad-air-11", "iPad Air 11-inch", (178.5, 247.6), (1640, 2360), 264., 18., SIDE_CAMERA),
+    tablet("ipad-11", "iPad 11-inch (A16)", (179.5, 248.6), (1640, 2360), 264., 18., SIDE_CAMERA),
+    tablet("ipad-mini", "iPad mini (A17 Pro)", (134.8, 195.4), (1488, 2266), 326., 21.5, TOP_CAMERA),
+    tablet("ipad-pro-12-9", "iPad Pro 12.9-inch (2018–2022)", (214.9, 280.6), (2048, 2732), 264., 18., TOP_CAMERA),
+    tablet("ipad-9", "iPad (9th generation)", (174.1, 250.6), (1620, 2160), 264., 0., Cutout::Home),
+];
+
+/// Earlier names for models, still read from saved designs.
+const ALIASES: &[(&str, &str)] = &[
+    ("iphone-island", "iphone-18-pro-max"),
+    ("iphone-notch", "iphone-14"),
+    ("iphone-classic", "iphone-se"),
+    ("ipad-pro", "ipad-pro-13"),
+    ("ipad-classic", "ipad-9"),
+];
+
+/// The metal band visible around the front glass, in millimetres.
+const EDGE_MM: f32 = 0.8;
+
+/// A device model from the catalog. Saved by its slug.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct DeviceModel(u16);
+
+impl std::fmt::Debug for DeviceModel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.slug())
+    }
+}
+
+impl Default for DeviceModel {
+    fn default() -> Self {
+        Target::Iphone.default_model()
+    }
+}
+
+impl Serialize for DeviceModel {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.slug())
+    }
+}
+
+impl<'de> Deserialize<'de> for DeviceModel {
+    /// A model this version doesn't know becomes the default phone, so a
+    /// design from a newer AppDoctor still opens.
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let slug = String::deserialize(deserializer)?;
+        Ok(DeviceModel::from_slug(&slug).unwrap_or_default())
+    }
 }
 
 impl DeviceModel {
-    pub const ALL: [DeviceModel; 5] = [
-        DeviceModel::IphoneIsland,
-        DeviceModel::IphoneNotch,
-        DeviceModel::IphoneClassic,
-        DeviceModel::IpadPro,
-        DeviceModel::IpadClassic,
-    ];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            DeviceModel::IphoneIsland => "iPhone with Dynamic Island",
-            DeviceModel::IphoneNotch => "iPhone with notch",
-            DeviceModel::IphoneClassic => "iPhone with home button",
-            DeviceModel::IpadPro => "iPad Pro",
-            DeviceModel::IpadClassic => "iPad with home button",
-        }
+    /// Every model, iPhones then iPads, newest first.
+    pub fn all() -> impl Iterator<Item = DeviceModel> {
+        (0..CATALOG.len() as u16).map(DeviceModel)
     }
 
-    /// The word for it in a segmented control.
-    pub fn short_label(self) -> &'static str {
-        match self {
-            DeviceModel::IphoneIsland => "Island",
-            DeviceModel::IphoneNotch => "Notch",
-            DeviceModel::IphoneClassic | DeviceModel::IpadClassic => "Classic",
-            DeviceModel::IpadPro => "Pro",
-        }
+    pub fn models_for(target: Target) -> impl Iterator<Item = DeviceModel> {
+        DeviceModel::all().filter(move |model| model.target() == target)
+    }
+
+    /// A model by its slug, or by a name earlier versions used.
+    pub fn from_slug(slug: &str) -> Option<DeviceModel> {
+        let slug = ALIASES
+            .iter()
+            .find(|(old, _)| *old == slug)
+            .map_or(slug, |(_, new)| *new);
+        CATALOG.iter().position(|spec| spec.slug == slug).map(|ix| DeviceModel(ix as u16))
+    }
+
+    fn spec(self) -> &'static Spec {
+        &CATALOG[self.0 as usize]
     }
 
     /// The name used in saved designs and by the MCP tools.
     pub fn slug(self) -> &'static str {
-        match self {
-            DeviceModel::IphoneIsland => "iphone-island",
-            DeviceModel::IphoneNotch => "iphone-notch",
-            DeviceModel::IphoneClassic => "iphone-classic",
-            DeviceModel::IpadPro => "ipad-pro",
-            DeviceModel::IpadClassic => "ipad-classic",
-        }
+        self.spec().slug
     }
 
-    pub fn from_slug(slug: &str) -> Option<DeviceModel> {
-        DeviceModel::ALL.into_iter().find(|model| model.slug() == slug)
+    pub fn label(self) -> &'static str {
+        self.spec().label
     }
 
+    /// iPhone or iPad.
     pub fn target(self) -> Target {
-        match self {
-            DeviceModel::IphoneIsland | DeviceModel::IphoneNotch | DeviceModel::IphoneClassic => Target::Iphone,
-            DeviceModel::IpadPro | DeviceModel::IpadClassic => Target::Ipad,
-        }
+        self.spec().target
     }
 
-    pub fn models_for(target: Target) -> impl Iterator<Item = DeviceModel> {
-        DeviceModel::ALL.into_iter().filter(move |model| model.target() == target)
+    pub fn has_home_button(self) -> bool {
+        self.spec().cutout == Cutout::Home
     }
 
-    fn spec(self) -> Spec {
-        match self {
-            DeviceModel::IphoneIsland => Spec {
-                screen_aspect: 2.173,
-                edge: 0.011,
-                bezel: 0.023,
-                chin: 0.,
-                body_radius: 0.135,
-                screen_radius: 0.105,
-            },
-            DeviceModel::IphoneNotch => Spec {
-                screen_aspect: 2.164,
-                edge: 0.012,
-                bezel: 0.026,
-                chin: 0.,
-                body_radius: 0.13,
-                screen_radius: 0.098,
-            },
-            DeviceModel::IphoneClassic => Spec {
-                screen_aspect: 1.778,
-                edge: 0.01,
-                bezel: 0.055,
-                chin: 0.19,
-                body_radius: 0.13,
-                screen_radius: 0.,
-            },
-            DeviceModel::IpadPro => Spec {
-                screen_aspect: 1.3333,
-                edge: 0.008,
-                bezel: 0.034,
-                chin: 0.,
-                body_radius: 0.075,
-                screen_radius: 0.045,
-            },
-            DeviceModel::IpadClassic => Spec {
-                screen_aspect: 1.3333,
-                edge: 0.008,
-                bezel: 0.07,
-                chin: 0.075,
-                body_radius: 0.07,
-                screen_radius: 0.,
-            },
-        }
-    }
-
-    /// Screen height / width: the screenshot's shape, or 16:9 for
-    /// home-button iPhones (their screenshots are cropped to fit).
+    /// Screen height / width: the shape a screenshot is cropped to.
     pub fn screen_aspect(self) -> f32 {
-        self.spec().screen_aspect
+        let (w, h) = self.spec().pixels;
+        h as f32 / w as f32
     }
 
-    /// Body height / width, so the screen inside has [`Self::screen_aspect`].
+    /// Body height / width.
     pub fn aspect(self) -> f32 {
+        let (w, h) = self.spec().body;
+        h / w
+    }
+
+    /// The screen's size in millimetres, from its pixels and density.
+    fn screen_mm(self) -> (f32, f32) {
         let spec = self.spec();
-        let inset = spec.edge + spec.bezel;
-        (1. - 2. * inset) * spec.screen_aspect + 2. * inset + 2. * spec.chin
+        let mm = |px: u32| px as f32 / spec.ppi * 25.4;
+        (mm(spec.pixels.0), mm(spec.pixels.1))
     }
 }
 
@@ -250,7 +368,7 @@ impl Frame {
     /// The front glass around the screen. Black, except a clay finish, and
     /// light finishes on home-button models, which had white fronts.
     pub fn glass_color(self, model: DeviceModel) -> &'static str {
-        let classic = matches!(model, DeviceModel::IphoneClassic | DeviceModel::IpadClassic);
+        let classic = model.has_home_button();
         match self {
             Frame::Clay => "#e9e6e1",
             Frame::Silver | Frame::Gold | Frame::Pink | Frame::Titanium if classic => "#f4f4f2",
@@ -279,23 +397,29 @@ pub struct DeviceGeometry {
     pub home_button: Option<Rect>,
     /// A pill above the screen of home-button iPhones.
     pub speaker: Option<Rect>,
-    /// A circle in the top bezel.
+    /// A circle, in the bezel or (iPhone Duo) in the screen.
     pub camera: Option<Rect>,
+    /// A foldable's crease: a hairline down the screen.
+    pub crease: Option<Rect>,
     /// Side buttons, drawn behind the body and poking out past its edges.
     pub buttons: Vec<Rect>,
 }
 
 pub fn device_geometry(layer: &Layer, model: DeviceModel, frame: Frame) -> DeviceGeometry {
     let spec = model.spec();
-    let w = layer.width;
     let body = layer.rect();
+    // Canvas pixels per millimetre.
+    let k = layer.width / spec.body.0;
+    let (screen_w, screen_h) = model.screen_mm();
+    let mm_per_pt = 25.4 / spec.ppi * spec.scale;
+    let screen_radius_mm = spec.radius_pt * mm_per_pt;
 
     if frame == Frame::None {
-        let radius = if spec.screen_radius > 0. {
-            spec.screen_radius * 1.15
+        let radius = if screen_radius_mm > 0. {
+            screen_radius_mm * k
         } else {
-            0.04
-        } * w;
+            layer.width * 0.04
+        };
         return DeviceGeometry {
             body,
             body_radius: radius,
@@ -309,19 +433,27 @@ pub fn device_geometry(layer: &Layer, model: DeviceModel, frame: Frame) -> Devic
             home_button: None,
             speaker: None,
             camera: None,
+            crease: None,
             buttons: Vec::new(),
         };
     }
 
-    let body_radius = spec.body_radius * w;
-    let edge = spec.edge * w;
+    // Bezels from the difference between body and screen; the screen stays
+    // centred even when the layer's height was typed in by hand.
+    let side_mm = ((spec.body.0 - screen_w) / 2.).max(EDGE_MM + 0.5);
+    let top_mm = ((spec.body.1 - screen_h) / 2.).max(EDGE_MM + 0.5);
+    let edge = EDGE_MM * k;
     let glass = inset(body, edge, edge);
+    let screen = inset(body, side_mm * k, top_mm * k);
+    let screen_radius = screen_radius_mm * k;
+    // Concentric with the screen's corners; home-button phones are rounder.
+    let body_radius = if screen_radius_mm > 0. {
+        (screen_radius_mm + side_mm) * k
+    } else {
+        layer.width * if spec.target == Target::Ipad { 0.07 } else { 0.13 }
+    };
     let glass_radius = (body_radius - edge).max(0.);
-    let side = (spec.edge + spec.bezel) * w;
-    let screen = inset(body, side, side + spec.chin * w);
-    let screen_radius = spec.screen_radius * w;
     let centre_x = body.x + body.width / 2.;
-    // Centre of the glass above and below the screen.
     let top_band = (glass.y + screen.y) / 2.;
     let bottom_band = (screen.y + screen.height + glass.y + glass.height) / 2.;
     let circle = |cx: f32, cy: f32, diameter: f32| Rect {
@@ -344,50 +476,70 @@ pub fn device_geometry(layer: &Layer, model: DeviceModel, frame: Frame) -> Devic
         home_button: None,
         speaker: None,
         camera: None,
+        crease: None,
         buttons: Vec::new(),
     };
-    match model {
-        DeviceModel::IphoneIsland => {
-            let (width, height) = (w * 0.29, w * 0.083);
+    match spec.cutout {
+        Cutout::Island => {
+            let (width, height) = (20.5 * k, 6.1 * k);
             geometry.island = Some(Rect {
                 x: centre_x - width / 2.,
-                y: screen.y + w * 0.026,
+                y: screen.y + 1.8 * k,
                 width,
                 height,
             });
         }
-        DeviceModel::IphoneNotch => {
+        Cutout::Notch(width_mm) => {
             // Starts inside the bezel so it reads as part of it.
-            let width = w * 0.5;
-            let top = screen.y - spec.bezel * w * 0.5;
+            let width = width_mm * k;
+            let top = screen.y - (top_mm - EDGE_MM) * k * 0.5;
             geometry.notch = Some(Rect {
                 x: centre_x - width / 2.,
                 y: top,
                 width,
-                height: screen.y - top + w * 0.072,
+                height: screen.y - top + 5.2 * k,
             });
-            geometry.notch_radius = w * 0.04;
+            geometry.notch_radius = 1.8 * k;
         }
-        DeviceModel::IphoneClassic => {
-            let (width, height) = (w * 0.16, w * 0.016);
+        Cutout::Punch => {
+            geometry.camera = Some(circle(screen.x + screen.width / 2., screen.y + 4. * k, 3.2 * k));
+        }
+        Cutout::Camera { side: false } => {
+            geometry.camera = Some(circle(centre_x, top_band, 2.6 * k));
+        }
+        Cutout::Camera { side: true } => {
+            // On the long edge, which is the right side when held upright.
+            geometry.camera = Some(circle(
+                (screen.x + screen.width + glass.x + glass.width) / 2.,
+                body.y + body.height / 2.,
+                2.6 * k,
+            ));
+        }
+        Cutout::Home if spec.target == Target::Iphone => {
+            let (width, height) = (11. * k, 1.2 * k);
             geometry.speaker = Some(Rect {
                 x: centre_x - width / 2.,
                 y: top_band - height / 2.,
                 width,
                 height,
             });
-            geometry.camera = Some(circle(centre_x - w * 0.15, top_band, w * 0.034));
-            geometry.home_button = Some(circle(centre_x, bottom_band, w * 0.165));
+            geometry.camera = Some(circle(centre_x - 10. * k, top_band, 2.4 * k));
+            geometry.home_button = Some(circle(centre_x, bottom_band, 11. * k));
         }
-        DeviceModel::IpadPro => {
-            geometry.camera = Some(circle(centre_x, top_band, w * 0.013));
-        }
-        DeviceModel::IpadClassic => {
-            geometry.camera = Some(circle(centre_x, top_band, w * 0.016));
-            geometry.home_button = Some(circle(centre_x, bottom_band, w * 0.072));
+        Cutout::Home => {
+            geometry.camera = Some(circle(centre_x, top_band, 2.8 * k));
+            geometry.home_button = Some(circle(centre_x, bottom_band, 12.5 * k));
         }
     }
-    geometry.buttons = buttons(model, body);
+    if spec.crease {
+        geometry.crease = Some(Rect {
+            x: screen.x + screen.width / 2. - 0.25 * k,
+            y: screen.y,
+            width: 0.5 * k,
+            height: screen.height,
+        });
+    }
+    geometry.buttons = buttons(spec.buttons, body, k);
     geometry
 }
 
@@ -401,32 +553,26 @@ fn inset(rect: Rect, dx: f32, dy: f32) -> Rect {
 }
 
 /// The side buttons: (side, start, length) as shares of the body's height
-/// (left and right edges) or width (the top edge).
-fn buttons(model: DeviceModel, body: Rect) -> Vec<Rect> {
+/// (left and right edges) or width (the top edge). `k` is pixels per mm.
+fn buttons(layout: Buttons, body: Rect, k: f32) -> Vec<Rect> {
     enum Side {
         Left,
         Right,
         Top,
     }
     use Side::*;
-    let (thickness, layout): (f32, &[(Side, f32, f32)]) = match model {
-        DeviceModel::IphoneIsland => (
-            0.011,
+    let (thickness_mm, layout): (f32, &[(Side, f32, f32)]) = match layout {
+        Buttons::Iphone => (
+            0.85,
             &[(Left, 0.155, 0.04), (Left, 0.225, 0.07), (Left, 0.31, 0.07), (Right, 0.255, 0.11)],
         ),
-        DeviceModel::IphoneNotch => (
-            0.011,
-            &[(Left, 0.14, 0.035), (Left, 0.205, 0.07), (Left, 0.29, 0.07), (Right, 0.24, 0.11)],
-        ),
-        DeviceModel::IphoneClassic => (
-            0.011,
+        Buttons::IphoneClassic => (
+            0.85,
             &[(Left, 0.13, 0.03), (Left, 0.19, 0.055), (Left, 0.26, 0.055), (Right, 0.19, 0.065)],
         ),
-        DeviceModel::IpadPro => (0.007, &[(Top, 0.8, 0.08), (Right, 0.06, 0.05), (Right, 0.125, 0.05)]),
-        DeviceModel::IpadClassic => (0.007, &[(Top, 0.8, 0.06), (Right, 0.17, 0.045), (Right, 0.23, 0.045)]),
+        Buttons::Ipad => (1.4, &[(Top, 0.8, 0.08), (Right, 0.06, 0.05), (Right, 0.125, 0.05)]),
     };
-    let w = body.width;
-    let (thick, out) = (w * thickness, w * thickness * 0.6);
+    let (thick, out) = (thickness_mm * k, thickness_mm * k * 0.6);
     layout
         .iter()
         .map(|(side, start, length)| match side {
@@ -443,9 +589,9 @@ fn buttons(model: DeviceModel, body: Rect) -> Vec<Rect> {
                 height: body.height * length,
             },
             Top => Rect {
-                x: body.x + w * start,
+                x: body.x + body.width * start,
                 y: body.y - out,
-                width: w * length,
+                width: body.width * length,
                 height: thick,
             },
         })

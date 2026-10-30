@@ -40,7 +40,17 @@ pub fn to_svg(slides: &[Slide], index: usize, size: CanvasSize) -> String {
         h as f32 / k
     ));
 
-    for (ix, (_, layer)) in visible_layers(slides, index, canvas_width).iter().enumerate() {
+    // Screenshots continue onto their neighbours; header and search
+    // versions stand alone.
+    let layers = if size.target().is_screenshot() {
+        visible_layers(slides, index, canvas_width)
+    } else {
+        slides
+            .get(index)
+            .map(|slide| slide.layers.iter().filter(|l| !l.hidden).map(|l| (index, l.clone())).collect())
+            .unwrap_or_default()
+    };
+    for (ix, (_, layer)) in layers.iter().enumerate() {
         body.push_str(&format!(r#"<g opacity="{}">"#, layer.opacity.clamp(0., 1.)));
         layer_svg(layer, ix, &mut defs, &mut body);
         body.push_str("</g>");
@@ -128,6 +138,9 @@ fn layer_svg(layer: &Layer, index: usize, defs: &mut String, body: &mut String) 
                     ));
                 }
                 None => body.push_str(&rect(s, g.screen_radius, "#1c1c1f", "")),
+            }
+            if let Some(crease) = g.crease {
+                body.push_str(&rect(crease, 0., "#000000", r#" fill-opacity="0.22""#));
             }
             if let Some(island) = g.island {
                 body.push_str(&rect(island, island.height / 2., "#000000", ""));

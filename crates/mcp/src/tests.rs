@@ -133,7 +133,7 @@ fn designs_a_slide_the_editor_can_open() {
     call_json(
         &server,
         "update_layer",
-        json!({ "app_id": APP, "layer_id": device_id, "model": "iphone-notch", "frame": "orange", "width": 900 }),
+        json!({ "app_id": APP, "layer_id": device_id, "model": "iphone-16e", "frame": "orange", "width": 900 }),
     );
     call_json(&server, "arrange_layer", json!({ "app_id": APP, "layer_id": text_id, "to": "back" }));
 
@@ -146,12 +146,13 @@ fn designs_a_slide_the_editor_can_open() {
         LayerKind::Text { italic: true, font: Some(font), .. } if font == "Definitely Not A Font"
     ));
     let device = slide.layers.iter().find(|layer| layer.id == device_id).unwrap();
+    let sixteen_e = DeviceModel::from_slug("iphone-16e").unwrap();
     assert!(matches!(
         device.kind,
-        LayerKind::Device { model: DeviceModel::IphoneNotch, frame: Frame::Orange, .. }
+        LayerKind::Device { model, frame: Frame::Orange, .. } if model == sixteen_e
     ));
     assert_eq!(device.width, 900.);
-    assert!((device.height - 900. * DeviceModel::IphoneNotch.aspect()).abs() < 0.01);
+    assert!((device.height - 900. * sixteen_e.aspect()).abs() < 0.01);
 
     let (content, failed) = call(&server, "render_slide", json!({ "app_id": APP, "slide": 0, "scale": 0.1 }));
     assert!(!failed);
@@ -178,6 +179,23 @@ fn ipad_designs_are_separate() {
     let apps = call_json(&server, "list_apps", json!({}));
     assert_eq!(apps["apps"][0]["ipad_slides"], 1);
     assert_eq!(apps["apps"][0]["iphone_slides"], 0);
+}
+
+#[test]
+fn designs_header_and_search_art() {
+    let dir = data_dir("header");
+    let server = Server::new(dir.clone());
+    let added = call_json(&server, "add_slide", json!({ "app_id": APP, "device": "header", "starter": true }));
+    assert_eq!(added["layers"].as_array().unwrap().len(), 3);
+    let design = call_json(&server, "get_design", json!({ "app_id": APP, "device": "header" }));
+    assert_eq!(design["canvas"]["width"], 3840.0);
+    assert_eq!(design["canvas"]["height"], 1646.0);
+    let (content, failed) = call(&server, "render_slide", json!({ "app_id": APP, "device": "search", "slide": 0 }));
+    assert!(failed && content[0]["text"].as_str().unwrap().contains("no slide"));
+    let options = call_json(&server, "design_options", json!({}));
+    assert!(options["models"].as_array().unwrap().len() > 30);
+    assert_eq!(options["designs"].as_array().unwrap().len(), 4);
+    assert!(dir.join("screenshots").join(APP.to_string()).join("design-header.json").exists());
 }
 
 #[test]

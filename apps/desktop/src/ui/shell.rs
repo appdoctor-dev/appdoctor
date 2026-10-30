@@ -2,6 +2,7 @@
 //! sections of the selected app), and the current page.
 
 use appdoctor_entitlement::Status;
+use appdoctor_screenshots::Target;
 use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
 use gpui_kit::component::{ActiveTheme as _, Icon, IconName, Sizable as _, TitleBar, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -104,6 +105,48 @@ impl Shell {
             .on_click(cx.listener(move |this, _, _, cx| this.go(section, cx)))
     }
 
+    /// A design under Screenshots: iPhone, iPad, header or search art.
+    fn screenshot_item(&self, target: Target, cx: &mut Context<Self>) -> Stateful<Div> {
+        let state = self.state.read(cx);
+        let active = state.section == Section::Screenshots && state.screenshot_target == target;
+        let theme = cx.theme();
+        let (icon, label) = match target {
+            Target::Iphone => (gpui_kit::assets::IconName::Smartphone, "iPhone"),
+            Target::Ipad => (gpui_kit::assets::IconName::Tablet, "iPad"),
+            Target::Header => (gpui_kit::assets::IconName::PanelTop, "Page header"),
+            Target::Search => (gpui_kit::assets::IconName::ScanSearch, "Search result"),
+        };
+        h_flex()
+            .id(("nav-shots", target as usize))
+            .h(px(26.))
+            .ml(px(22.))
+            .px_2()
+            .gap_2()
+            .items_center()
+            .rounded(theme.radius)
+            .text_size(px(12.5))
+            .cursor_pointer()
+            .map(|this| {
+                if active {
+                    this.bg(theme.sidebar_accent)
+                        .text_color(theme.sidebar_accent_foreground)
+                        .font_weight(FontWeight::MEDIUM)
+                } else {
+                    this.text_color(theme.muted_foreground)
+                        .hover(|style| style.bg(theme.sidebar_accent.opacity(0.6)))
+                }
+            })
+            .child(
+                Icon::new(icon)
+                    .size(px(13.))
+                    .text_color(if active { theme.primary } else { theme.muted_foreground }),
+            )
+            .child(label)
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.state.update(cx, |state, cx| state.open_screenshots(target, cx))
+            }))
+    }
+
     fn group_label(label: &str, cx: &App) -> Div {
         h_flex()
             .px_2()
@@ -124,6 +167,10 @@ impl Shell {
         let account = state.account.status.clone();
         let update = state.update.clone();
         let theme = cx.theme().clone();
+        let screenshot_items: Vec<_> = Target::ALL
+            .into_iter()
+            .map(|target| self.screenshot_item(target, cx))
+            .collect();
 
         let app_rows: Vec<_> = apps
             .into_iter()
@@ -294,6 +341,7 @@ impl Shell {
                         Section::Screenshots,
                         cx,
                     ))
+                    .children(screenshot_items)
                     .child(Self::group_label("Ship", cx))
                     .child(self.nav_item("nav-release", IconName::CircleCheck, "App Review", Section::Release, cx)),
             )

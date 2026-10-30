@@ -1,7 +1,7 @@
 //! The right-hand inspector: the selected layer's properties, or the
 //! screenshot's background when nothing is selected.
 
-use appdoctor_screenshots::{Align, BACKGROUND_PRESETS, Background, DeviceModel, Frame, Layer, LayerKind};
+use appdoctor_screenshots::{Align, BACKGROUND_PRESETS, Background, Frame, Layer, LayerKind, Target};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputState, Textarea};
 use gpui_kit::component::select::Select;
@@ -328,19 +328,20 @@ impl ScreenshotsView {
                 screenshot,
             } => {
                 let model = *model;
-                let models: Vec<DeviceModel> = DeviceModel::models_for(model.target()).collect();
-                let model_ix = models.iter().position(|m| *m == model).unwrap_or(0);
-                let model_control = models
-                    .iter()
-                    .fold(Segmented::new("device-model", ROW_CONTROL + 18.), |control, m| {
-                        control.item(div().child(m.short_label()), m.label())
-                    })
-                    .selected(model_ix)
-                    .on_select(cx.listener(move |this, ix: &usize, window, cx| {
-                        if let Some(model) = DeviceModel::models_for(model.target()).nth(*ix) {
-                            this.set_model(model, window, cx)
-                        }
-                    }));
+                // Every iPhone and iPad, newest first; type to search.
+                let model_control = div()
+                    .w_full()
+                    .h(px(28.))
+                    .rounded(px(7.))
+                    .bg(theme.foreground.opacity(0.06))
+                    .child(
+                        Select::new(&self.models)
+                            .appearance(false)
+                            .small()
+                            .menu_width(px(CONTENT))
+                            .search_placeholder("Search devices")
+                            .placeholder(model.label()),
+                    );
                 let framed = *frame != Frame::None;
                 let finishes = h_flex().gap(px(5.)).children(
                     Frame::ALL
@@ -372,7 +373,7 @@ impl ScreenshotsView {
                                 cx,
                             ))
                             .child(separator(cx))
-                            .child(row("Model", model_control, cx))
+                            .child(stacked("Model", None, model_control, cx))
                             .child(separator(cx))
                             .child(row(
                                 "Frame",
@@ -600,7 +601,21 @@ impl ScreenshotsView {
             .text_size(px(12.))
             .text_color(theme.muted_foreground)
             .child("Click a layer to edit it. Drag to move it (hold ⌥ to skip snapping), drag a corner to resize it, and use the arrow keys to nudge.")
-            .child("Drag a device past the edge to carry it onto the next screenshot.")
+            .when(self.target.is_screenshot(), |this| {
+                this.child("Drag a device past the edge to carry it onto the next screenshot.")
+            })
+            .when(self.target == Target::Header, |this| {
+                this.child(
+                    "The product page header shows on iOS 27 and iPadOS 27. Keep words inside the dashed line: \
+                     the App Store crops the rest on some devices. Each version is an alternative to try.",
+                )
+            })
+            .when(self.target == Target::Search, |this| {
+                this.child(
+                    "Search result art shows in App Store search on iOS 27 and iPadOS 27. Make what the app does \
+                     obvious at a glance.",
+                )
+            })
             .child("Ask your AI agent to design them too: AI agent, top right.");
 
         v_flex()
@@ -611,7 +626,7 @@ impl ScreenshotsView {
                         div()
                             .text_size(px(15.))
                             .font_weight(FontWeight::SEMIBOLD)
-                            .child(format!("Screenshot {}", self.slide + 1)),
+                            .child(format!("{} {}", self.slide_noun(), self.slide + 1)),
                     )
                     .child(
                         div()
@@ -620,11 +635,10 @@ impl ScreenshotsView {
                             .child({
                                 let sizes = self.target.sizes();
                                 let (w, h) = sizes[0].pixels();
-                                format!(
-                                    "{} · {w} × {h}, also exports {}",
-                                    sizes[0].label(),
-                                    sizes.get(1).map_or("", |size| size.label())
-                                )
+                                match sizes.get(1) {
+                                    Some(also) => format!("{} · {w} × {h}, also exports {}", sizes[0].label(), also.label()),
+                                    None => format!("{} · {w} × {h}", sizes[0].label()),
+                                }
                             }),
                     ),
             )

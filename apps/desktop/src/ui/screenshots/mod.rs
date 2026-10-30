@@ -69,6 +69,27 @@ impl SelectItem for FontItem {
 
 type FontSelect = SelectState<SearchableVec<FontItem>>;
 
+/// A device model in the picker; its value is the model's slug.
+#[derive(Clone)]
+struct ModelItem {
+    slug: SharedString,
+    label: SharedString,
+}
+
+impl SelectItem for ModelItem {
+    type Value = SharedString;
+
+    fn title(&self) -> SharedString {
+        self.label.clone()
+    }
+
+    fn value(&self) -> &SharedString {
+        &self.slug
+    }
+}
+
+type ModelSelect = SelectState<SearchableVec<ModelItem>>;
+
 /// The installed fonts, suggested ones first.
 fn font_items() -> Vec<FontItem> {
     let all = font_families();
@@ -147,6 +168,7 @@ pub struct ScreenshotsView {
     inputs: Inputs,
     sliders: Sliders,
     fonts: Entity<FontSelect>,
+    models: Entity<ModelSelect>,
     /// While controls are filled from the selection, their events aren't edits.
     syncing: bool,
     status: Option<Result<String, String>>,
@@ -180,6 +202,13 @@ impl ScreenshotsView {
         };
 
         let fonts = cx.new(|cx| FontSelect::new(SearchableVec::new(Vec::new()), None, window, cx).searchable(true));
+        let model_items: Vec<ModelItem> = DeviceModel::all()
+            .map(|model| ModelItem {
+                slug: model.slug().into(),
+                label: model.label().into(),
+            })
+            .collect();
+        let models = cx.new(|cx| ModelSelect::new(SearchableVec::new(model_items), None, window, cx).searchable(true));
         cx.spawn_in(window, async move |this, cx| {
             let items = cx.background_spawn(async { font_items() }).await;
             this.update_in(cx, |this, window, cx| {
@@ -206,6 +235,14 @@ impl ScreenshotsView {
                     && !this.syncing
                 {
                     this.set_font(name.to_string(), window, cx);
+                }
+            }),
+            cx.subscribe_in(&models, window, |this, _, event: &SelectEvent<_>, window, cx| {
+                if let SelectEvent::Confirm(Some(slug)) = event
+                    && !this.syncing
+                    && let Some(model) = DeviceModel::from_slug(slug)
+                {
+                    this.set_model(model, window, cx);
                 }
             }),
         ];
@@ -336,6 +373,7 @@ impl ScreenshotsView {
             inputs,
             sliders,
             fonts,
+            models,
             syncing: false,
             status: None,
             exporting: false,
@@ -366,22 +404,23 @@ impl ScreenshotsView {
         Some(self.folder(cx)?.join(self.target.file_name()))
     }
 
+    /// Opens the selected app's design for the target the sidebar picked.
     fn follow_app(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.state.read(cx).selected_app == self.app_id {
+        let state = self.state.read(cx);
+        let (app, target) = (state.selected_app, state.screenshot_target);
+        if (app, target) == (self.app_id, self.target) {
             return;
         }
         self.flush(cx);
-        self.app_id = self.state.read(cx).selected_app;
+        self.app_id = app;
+        self.target = target;
         self.load(window, cx);
     }
 
-    /// Switches between the app's iPhone and iPad designs.
-    fn set_target(&mut self, target: Target, window: &mut Window, cx: &mut Context<Self>) {
-        if target != self.target {
-            self.flush(cx);
-            self.target = target;
-            self.load(window, cx);
-        }
+    /// What one slide is called: screenshots form a set, while header and
+    /// search art are alternatives of one asset.
+    fn slide_noun(&self) -> &'static str {
+        if self.target.is_screenshot() { "Screenshot" } else { "Version" }
     }
 
     /// Opens the selected app's design for the current target, starting
@@ -406,7 +445,8 @@ impl ScreenshotsView {
             .and_then(|path| std::fs::read(path).ok())
             .unwrap_or_default();
         self.next_id = self.design.max_id();
-        if self.design.slides.is_empty() && self.app_id.is_some() {
+        let started = self.design.slides.is_empty() && self.app_id.is_some();
+        if started {
             let slide = Slide::starter(target, &app_name, &mut self.next_id);
             self.design.slides.push(slide);
         }
@@ -418,6 +458,10 @@ impl ScreenshotsView {
         self.thumbs.clear();
         self.sync_controls(window, cx);
         self.render_thumbs(cx);
+        // A new design is saved straight away, so an agent sees what you see.
+        if started {
+            self.changed(cx);
+        }
         cx.notify();
     }
 
@@ -674,7 +718,11 @@ impl ScreenshotsView {
                     set_slider(&self.sliders.radius, *radius, window, cx);
                 }
                 LayerKind::Image { radius, .. } => set_slider(&self.sliders.radius, *radius, window, cx),
-                LayerKind::Device { .. } => {}
+                LayerKind::Device { model, .. } => {
+                    let slug = SharedString::from(model.slug());
+                    self.models
+                        .update(cx, |select, cx| select.set_selected_value(&slug, window, cx));
+                }
             }
         }
         if let Some(background) = self.current().map(|slide| slide.background.clone()) {
@@ -1097,6 +1145,9 @@ impl ScreenshotsView {
         let Some(layer) = self.layer(id).cloned() else {
             return;
         };
+        if !self.target.is_screenshot() {
+            return;
+        }
         let width = self.target.canvas().0;
         let centre = layer.x + layer.width / 2.;
         let steps = (centre / width).floor() as isize;

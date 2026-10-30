@@ -45,6 +45,8 @@ pub struct AppState {
     pub services: Arc<Services>,
     pub icons: Entity<IconCache>,
     pub section: Section,
+    /// Which design the Screenshots section shows.
+    pub screenshot_target: appdoctor_screenshots::Target,
     pub apps: Vec<AppRecord>,
     pub selected_app: Option<u64>,
     /// The storefront the keyword table shows and new keywords go to.
@@ -68,6 +70,7 @@ impl AppState {
             account: Account::load(&services),
             icons,
             section: Section::Keywords,
+            screenshot_target: appdoctor_screenshots::Target::Iphone,
             apps: Vec::new(),
             selected_app: None,
             country: "us".into(),
@@ -126,6 +129,13 @@ impl AppState {
 
     pub fn set_section(&mut self, section: Section, cx: &mut Context<Self>) {
         self.section = section;
+        cx.notify();
+    }
+
+    /// Opens the Screenshots section on one of its designs.
+    pub fn open_screenshots(&mut self, target: appdoctor_screenshots::Target, cx: &mut Context<Self>) {
+        self.screenshot_target = target;
+        self.section = Section::Screenshots;
         cx.notify();
     }
 

@@ -27,7 +27,7 @@ fn starter_slide_has_text_and_device_layers() {
     let ids: Vec<_> = slide.layers.iter().map(|l| l.id).collect();
     assert_eq!(ids, vec![1, 2, 3]);
     let device = &slide.layers[2];
-    assert!((device.height / device.width - DeviceModel::IphoneIsland.aspect()).abs() < 1e-3);
+    assert!((device.height / device.width - Target::Iphone.default_model().aspect()).abs() < 1e-3);
 }
 
 #[test]
@@ -48,11 +48,11 @@ fn svg_escapes_text_hides_hidden_layers_and_sanitises_colors() {
 #[test]
 fn device_geometry_insets_the_screen_inside_the_bezel() {
     let device = Layer::device(Target::Iphone, 1, 600.);
-    let g = device_geometry(&device, DeviceModel::IphoneIsland, Frame::Black);
+    let g = device_geometry(&device, Target::Iphone.default_model(), Frame::Black);
     assert!(g.screen.x > g.glass.x && g.glass.x > g.body.x && g.screen.width < g.body.width);
     assert!(g.island.is_some() && g.notch.is_none() && g.home_button.is_none());
     assert_eq!(g.buttons.len(), 4);
-    let bare = device_geometry(&device, DeviceModel::IphoneIsland, Frame::None);
+    let bare = device_geometry(&device, Target::Iphone.default_model(), Frame::None);
     assert_eq!(bare.screen, bare.body);
     assert!(bare.island.is_none() && bare.buttons.is_empty());
 }
@@ -159,7 +159,7 @@ fn layers_hanging_off_a_slide_continue_on_its_neighbours() {
 
 #[test]
 fn every_model_fits_a_screen_of_the_screenshot_shape() {
-    for model in DeviceModel::ALL {
+    for model in DeviceModel::all() {
         let mut layer = Layer::device(model.target(), 1, 0.);
         layer.height = layer.width * model.aspect();
         for frame in Frame::ALL {
@@ -178,10 +178,6 @@ fn every_model_fits_a_screen_of_the_screenshot_shape() {
             }
         }
         assert_eq!(DeviceModel::from_slug(model.slug()), Some(model));
-        if model != DeviceModel::IphoneClassic {
-            let (w, h) = model.target().canvas();
-            assert!((model.screen_aspect() - h / w).abs() < 0.01, "{model:?}");
-        }
     }
     for frame in Frame::ALL {
         assert_eq!(Frame::from_slug(frame.slug()), Some(frame));
@@ -194,10 +190,7 @@ fn ipad_designs_render_at_ipad_sizes() {
     let slide = Slide::starter(Target::Ipad, "Plan on the big screen", &mut id);
     assert!(matches!(
         slide.layers[2].kind,
-        LayerKind::Device {
-            model: DeviceModel::IpadPro,
-            ..
-        }
+        LayerKind::Device { model, .. } if model == Target::Ipad.default_model()
     ));
     let dir = std::env::temp_dir();
     for size in Target::Ipad.sizes() {
@@ -257,4 +250,54 @@ fn designs_keep_their_target() {
     assert_eq!(Design::load_for(&dir, Target::Ipad), design);
     assert!(Design::load_for(&dir, Target::Iphone).slides.is_empty());
     let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn the_catalog_covers_current_and_older_devices() {
+    for slug in ["iphone-18-pro-max", "iphone-duo", "iphone-duo-open", "iphone-air", "iphone-17e", "iphone-se", "ipad-mini", "ipad-9"] {
+        assert!(DeviceModel::from_slug(slug).is_some(), "{slug}");
+    }
+    // Names from before the catalog still open.
+    assert_eq!(DeviceModel::from_slug("iphone-notch"), DeviceModel::from_slug("iphone-14"));
+    let unknown: LayerKind = serde_json::from_str(
+        r#"{"type": "device", "model": "iphone-99", "frame": "black", "screenshot": null, "shadow": true}"#,
+    )
+    .unwrap();
+    assert!(matches!(unknown, LayerKind::Device { model, .. } if model == Target::Iphone.default_model()));
+    // Bezels come from the measurements: the 18 Pro Max's are about 2.5 mm.
+    let model = DeviceModel::from_slug("iphone-18-pro-max").unwrap();
+    let layer = Layer {
+        width: 780.,
+        height: 780. * model.aspect(),
+        ..Layer::device(Target::Iphone, 1, 0.)
+    };
+    let g = device_geometry(&layer, model, Frame::Black);
+    assert!(((g.screen.x - g.body.x) / 10. - 2.55).abs() < 0.1);
+    assert!(g.island.is_some());
+    let duo = DeviceModel::from_slug("iphone-duo-open").unwrap();
+    assert!(duo.aspect() < 1.);
+    let g = device_geometry(&Layer { width: 1646., height: 1646. * duo.aspect(), ..layer }, duo, Frame::Black);
+    assert!(g.crease.is_some() && g.camera.is_some());
+}
+
+#[test]
+fn header_and_search_art_render_at_apple_sizes() {
+    for target in [Target::Header, Target::Search] {
+        let mut id = 0;
+        let slide = Slide::starter(target, "Calm in minutes", &mut id);
+        let (width, height) = target.canvas();
+        for layer in &slide.layers {
+            assert!(layer.x >= 0. && layer.x + layer.width <= width, "{target:?} {}", layer.name);
+            assert!(layer.y + layer.height <= height, "{target:?} {}", layer.name);
+        }
+        for size in target.sizes() {
+            let png = render_png(std::slice::from_ref(&slide), 0, *size, &std::env::temp_dir(), 0.05).unwrap();
+            assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
+        }
+    }
+    assert_eq!(CanvasSize::Header.pixels(), (3840, 1646));
+    let (inset_x, _) = Target::Header.safe_inset().unwrap();
+    let mut id = 0;
+    let header = Slide::starter(Target::Header, "Calm", &mut id);
+    assert!(header.layers.iter().all(|l| l.x >= 3840. * inset_x - 1.));
 }

@@ -155,22 +155,43 @@ Every section in the sidebar is a page of this one window.
   - *Review and save…* lists every change in a dialog before writing to App
     Store Connect.
   - **Not yet run against a real account.**
-- **Screenshots.** A layer editor for App Store screenshots, inside the app.
-  - iPhone and iPad designs, switched in the header. iPhone uses a
-    1320×2868 canvas and exports 6.9" and 6.5". iPad uses 2064×2752 and
-    exports 13" (2064×2752) and 12.9" (2048×2732). Each has its own file.
+- **Screenshots.** A layer editor for App Store art, inside the app.
+  - Four designs per app, under Screenshots in the sidebar, each with its
+    own file:
+
+    | Design | Canvas | Exports |
+    |---|---|---|
+    | iPhone | 1320×2868 | 6.9" and 6.5" (1242×2688) |
+    | iPad | 2064×2752 | 13" and 12.9" (2048×2732) |
+    | Page header | 3840×1646 (21:9) | 3840×1646 |
+    | Search result | 3840×2560 (3:2) | 3840×2560 and 1920×1280 |
+
+    The page header and the search result are the product page and search
+    art Apple added on October 5, 2026, for iOS 27 and iPadOS 27.
+    - The header marks a safe area (18% in from the sides, 15% from the top
+      and bottom, measured from Apple's preview, since Apple gives no
+      numbers).
+    - Their slides are alternative versions rather than a set, so nothing
+      spans between them.
+    - Apple also takes 5–30 s looping videos in these slots; making video
+      isn't built yet.
   - The screenshots sit edge to edge on one stage, as the export cuts them,
     with a hairline at each cut. Each has a background (gradient presets, or
     your own gradient or solid colour) and a stack of layers: text, device,
     image and shape.
-  - Devices hold your screenshot. There are five models, all drawn from
-    proportions rather than Apple artwork:
-    - iPhone with Dynamic Island, with notch, or with home button;
-    - iPad Pro, or iPad with home button.
+  - Devices hold your screenshot. A searchable picker lists 36 models:
+    - iPhone 18 Pro Max back to iPhone X, iPhone SE and 8 Plus, including
+      iPhone Air and the iPhone Duo, open or closed;
+    - iPad Pro 13" and 11", iPad Air, iPad (A16), iPad mini, iPad Pro 12.9"
+      and the home-button iPad.
 
-    Each has side buttons and a camera, and comes in eight finishes (Black,
-    Silver, Titanium, Gold, Blue, Orange, Pink and a matte Clay) or with no
-    frame.
+    Each is drawn from Apple's published measurements, not Apple artwork:
+    body size in mm, screen pixels and density, and screen corner radius.
+    That gives each model its own bezels, corners, Dynamic Island, notch,
+    punch-hole, home button or camera (on the long edge for recent iPads),
+    and buttons. Each comes in eight finishes (Black, Silver, Titanium,
+    Gold, Blue, Orange, Pink and a matte Clay) or with no frame. Model names
+    from earlier designs still open.
   - Text uses any installed font: a searchable picker shows each one in its
     own typeface, with suggested ones first. Text can be italic. Lines wrap
     using the font's real glyph widths (ttf-parser through fontdb, the same

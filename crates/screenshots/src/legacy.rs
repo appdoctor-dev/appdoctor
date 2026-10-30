@@ -3,7 +3,7 @@
 
 use serde::Deserialize;
 
-use crate::{BASE_HEIGHT, BASE_WIDTH, Background, Design, DeviceModel, Frame, Layer, LayerKind, Slide, Target};
+use crate::{BASE_HEIGHT, BASE_WIDTH, Background, Design, Frame, Layer, LayerKind, Slide, Target};
 
 /// The first format's phone shape.
 const V1_DEVICE_ASPECT: f32 = 2.167;
@@ -74,7 +74,7 @@ pub(crate) fn parse(bytes: &[u8]) -> Option<Design> {
             device.height = width * V1_DEVICE_ASPECT;
             device.x = (BASE_WIDTH - width) / 2.;
             device.kind = LayerKind::Device {
-                model: DeviceModel::IphoneIsland,
+                model: Target::Iphone.default_model(),
                 frame: slide.device.frame,
                 screenshot: slide.device.screenshot,
                 shadow: true,

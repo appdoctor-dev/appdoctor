@@ -20,8 +20,8 @@ fn design_args() -> Value {
         "app_id": { "type": "integer", "description": "The app's App Store ID, from list_apps." },
         "device": {
             "type": "string",
-            "enum": ["iphone", "ipad"],
-            "description": "Which design: iPhone (canvas 1320 x 2868) or iPad (canvas 2064 x 2752). Defaults to iphone."
+            "enum": ["iphone", "ipad", "header", "search"],
+            "description": "Which design: iphone screenshots (canvas 1320 x 2868), ipad screenshots (2064 x 2752), the product page header (21:9, 3840 x 1646) or the search result art (3:2, 3840 x 2560). Defaults to iphone."
         }
     })
 }
@@ -44,7 +44,7 @@ fn layer_properties() -> Value {
         "align": { "type": "string", "enum": ["left", "center", "right"] },
         "font": { "type": "string", "description": "Text layers: an installed font family (see list_fonts). Empty for the default, Helvetica Neue." },
         "italic": { "type": "boolean" },
-        "model": { "type": "string", "enum": DeviceModel::ALL.iter().map(|m| m.slug()).collect::<Vec<_>>(), "description": "Device layers: the device's shape." },
+        "model": { "type": "string", "enum": DeviceModel::all().map(|m| m.slug()).collect::<Vec<_>>(), "description": "Device layers: which iPhone or iPad, e.g. iphone-18-pro-max, iphone-air, iphone-se, ipad-pro-13. design_options lists them all." },
         "frame": { "type": "string", "enum": Frame::ALL.iter().map(|f| f.slug()).collect::<Vec<_>>(), "description": "Device layers: the finish, or none for just the rounded screen." },
         "screenshot": { "type": "string", "description": "Device layers: path to a PNG or JPEG of the app's screen on this computer. It's copied into the design." },
         "image": { "type": "string", "description": "Image layers: path to a PNG, JPEG or WebP on this computer. It's copied into the design." },
@@ -379,11 +379,19 @@ fn list_apps(data_dir: &Path) -> Result<Vec<Value>> {
 fn design_options() -> Value {
     let installed = font_families();
     json!({
-        "devices": {
-            "iphone": { "canvas": Target::Iphone.canvas(), "exports": Target::Iphone.sizes().iter().map(|s| s.pixels()).collect::<Vec<_>>() },
-            "ipad": { "canvas": Target::Ipad.canvas(), "exports": Target::Ipad.sizes().iter().map(|s| s.pixels()).collect::<Vec<_>>() },
-        },
-        "models": DeviceModel::ALL.iter().map(|m| json!({
+        "designs": Target::ALL.iter().map(|t| json!({
+            "device": t.slug(),
+            "name": t.label(),
+            "canvas": t.canvas(),
+            "exports": t.sizes().iter().map(|s| s.pixels()).collect::<Vec<_>>(),
+            "safe_area_inset": t.safe_inset().map(|(x, y)| json!({ "x": x, "y": y })),
+            "slides_are": if t.is_screenshot() {
+                "a set shown side by side; layers can span onto the next slide"
+            } else {
+                "alternative versions of one asset"
+            },
+        })).collect::<Vec<_>>(),
+        "models": DeviceModel::all().map(|m| json!({
             "model": m.slug(),
             "label": m.label(),
             "device": m.target().slug(),

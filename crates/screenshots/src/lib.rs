@@ -45,18 +45,23 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub const BASE_WIDTH: f32 = 1320.;
 pub const BASE_HEIGHT: f32 = 2868.;
 
-/// The devices a design is for. Each has its own canvas, export sizes and
-/// design file.
+/// What a design is for: iPhone or iPad screenshots, or the product page
+/// header and search result art Apple added in iOS 27. Each has its own
+/// canvas, export sizes and design file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Target {
     #[default]
     Iphone,
     Ipad,
+    /// The 21:9 art at the top of the product page.
+    Header,
+    /// The 3:2 art in search results.
+    Search,
 }
 
 impl Target {
-    pub const ALL: [Target; 2] = [Target::Iphone, Target::Ipad];
+    pub const ALL: [Target; 4] = [Target::Iphone, Target::Ipad, Target::Header, Target::Search];
 
     /// Width and height of the canvas layers are positioned on: Apple's
     /// largest required size for each.
@@ -64,6 +69,8 @@ impl Target {
         match self {
             Target::Iphone => (BASE_WIDTH, BASE_HEIGHT),
             Target::Ipad => (2064., 2752.),
+            Target::Header => (3840., 1646.),
+            Target::Search => (3840., 2560.),
         }
     }
 
@@ -72,6 +79,8 @@ impl Target {
         match self {
             Target::Iphone => &[CanvasSize::Iphone69, CanvasSize::Iphone65],
             Target::Ipad => &[CanvasSize::Ipad13, CanvasSize::Ipad129],
+            Target::Header => &[CanvasSize::Header],
+            Target::Search => &[CanvasSize::Search, CanvasSize::SearchSmall],
         }
     }
 
@@ -79,6 +88,8 @@ impl Target {
         match self {
             Target::Iphone => "iPhone",
             Target::Ipad => "iPad",
+            Target::Header => "Product page header",
+            Target::Search => "Search result",
         }
     }
 
@@ -86,6 +97,8 @@ impl Target {
         match self {
             Target::Iphone => "iphone",
             Target::Ipad => "ipad",
+            Target::Header => "header",
+            Target::Search => "search",
         }
     }
 
@@ -98,14 +111,33 @@ impl Target {
         match self {
             Target::Iphone => "design.json",
             Target::Ipad => "design-ipad.json",
+            Target::Header => "design-header.json",
+            Target::Search => "design-search.json",
         }
     }
 
     /// The device new layers get.
     pub fn default_model(self) -> DeviceModel {
+        let slug = match self {
+            Target::Ipad => "ipad-pro-13",
+            Target::Iphone | Target::Header | Target::Search => "iphone-18-pro-max",
+        };
+        DeviceModel::from_slug(slug).expect("the default models are in the catalog")
+    }
+
+    /// Screenshots sit side by side in the App Store; header and search art
+    /// stand alone, so each of their slides is an alternative.
+    pub fn is_screenshot(self) -> bool {
+        matches!(self, Target::Iphone | Target::Ipad)
+    }
+
+    /// The share of the width and height to keep clear on each side, where
+    /// the App Store crops the art on some devices. Apple marks it in its
+    /// templates without numbers; these come from measuring the preview.
+    pub fn safe_inset(self) -> Option<(f32, f32)> {
         match self {
-            Target::Iphone => DeviceModel::IphoneIsland,
-            Target::Ipad => DeviceModel::IpadPro,
+            Target::Header => Some((0.18, 0.15)),
+            _ => None,
         }
     }
 }
@@ -132,14 +164,23 @@ pub enum CanvasSize {
     Ipad13,
     /// 12.9" iPad Pro (2nd generation), 2048 × 2732.
     Ipad129,
+    /// Product page header, 21:9.
+    Header,
+    /// Search result art at 3:2, largest (3840 × 2560) and smallest
+    /// (1920 × 1280) Apple takes.
+    Search,
+    SearchSmall,
 }
 
 impl CanvasSize {
-    pub const ALL: [CanvasSize; 4] = [
+    pub const ALL: [CanvasSize; 7] = [
         CanvasSize::Iphone69,
         CanvasSize::Iphone65,
         CanvasSize::Ipad13,
         CanvasSize::Ipad129,
+        CanvasSize::Header,
+        CanvasSize::Search,
+        CanvasSize::SearchSmall,
     ];
 
     pub fn pixels(self) -> (u32, u32) {
@@ -148,6 +189,9 @@ impl CanvasSize {
             CanvasSize::Iphone65 => (1242, 2688),
             CanvasSize::Ipad13 => (2064, 2752),
             CanvasSize::Ipad129 => (2048, 2732),
+            CanvasSize::Header => (3840, 1646),
+            CanvasSize::Search => (3840, 2560),
+            CanvasSize::SearchSmall => (1920, 1280),
         }
     }
 
@@ -155,6 +199,8 @@ impl CanvasSize {
         match self {
             CanvasSize::Iphone69 | CanvasSize::Iphone65 => Target::Iphone,
             CanvasSize::Ipad13 | CanvasSize::Ipad129 => Target::Ipad,
+            CanvasSize::Header => Target::Header,
+            CanvasSize::Search | CanvasSize::SearchSmall => Target::Search,
         }
     }
 
@@ -164,6 +210,9 @@ impl CanvasSize {
             CanvasSize::Iphone65 => "iPhone 6.5\"",
             CanvasSize::Ipad13 => "iPad 13\"",
             CanvasSize::Ipad129 => "iPad 12.9\"",
+            CanvasSize::Header => "Header 21:9",
+            CanvasSize::Search => "Search 3:2",
+            CanvasSize::SearchSmall => "Search 3:2, small",
         }
     }
 
@@ -173,6 +222,9 @@ impl CanvasSize {
             CanvasSize::Iphone65 => "iphone-6.5",
             CanvasSize::Ipad13 => "ipad-13",
             CanvasSize::Ipad129 => "ipad-12.9",
+            CanvasSize::Header => "header-21x9",
+            CanvasSize::Search => "search-3x2",
+            CanvasSize::SearchSmall => "search-3x2-small",
         }
     }
 }
@@ -353,10 +405,12 @@ impl Layer {
             * match target {
                 Target::Iphone => 0.78,
                 Target::Ipad => 0.8,
+                Target::Header => 0.14,
+                Target::Search => 0.22,
             };
         Layer {
             id,
-            name: target.label().into(),
+            name: model.target().label().into(),
             x: (canvas_width - width) / 2.,
             y,
             width,
@@ -421,22 +475,57 @@ impl Slide {
             *next_id += 1;
             *next_id
         };
-        // Caption sizes and the device's top, per canvas.
-        let (headline_y, headline_size, sub_y, sub_size, device_y) = match target {
-            Target::Iphone => (200., 104., 470., 54., 640.),
-            Target::Ipad => (170., 112., 330., 58., 520.),
+        let gradient = Background::Gradient {
+            from: "#4f46e5".into(),
+            to: "#9333ea".into(),
+            angle: 160.,
         };
-        Slide {
-            background: Background::Gradient {
-                from: "#4f46e5".into(),
-                to: "#9333ea".into(),
-                angle: 160.,
-            },
-            layers: vec![
-                Layer::text(target, id(), headline, headline_y, headline_size, 700, "#ffffff"),
-                Layer::text(target, id(), "One line on why it matters", sub_y, sub_size, 400, "#e0e7ff"),
-                Layer::device(target, id(), device_y),
-            ],
+        let (width, height) = target.canvas();
+        match target {
+            Target::Iphone | Target::Ipad => {
+                // Caption sizes and the device's top, per canvas.
+                let (headline_y, headline_size, sub_y, sub_size, device_y) = match target {
+                    Target::Iphone => (200., 104., 470., 54., 640.),
+                    _ => (170., 112., 330., 58., 520.),
+                };
+                Slide {
+                    background: gradient,
+                    layers: vec![
+                        Layer::text(target, id(), headline, headline_y, headline_size, 700, "#ffffff"),
+                        Layer::text(target, id(), "One line on why it matters", sub_y, sub_size, 400, "#e0e7ff"),
+                        Layer::device(target, id(), device_y),
+                    ],
+                }
+            }
+            // Wide: the words on the left, a phone on the right, all inside
+            // the safe area.
+            Target::Header => {
+                let mut title = Layer::text(target, id(), headline, height * 0.34, 150., 800, "#ffffff");
+                let mut sub = Layer::text(target, id(), "One line on why it matters", 0., 72., 400, "#e0e7ff");
+                for layer in [&mut title, &mut sub] {
+                    layer.x = width * 0.19;
+                    layer.width = width * 0.38;
+                    if let LayerKind::Text { align, .. } = &mut layer.kind {
+                        *align = Align::Left;
+                    }
+                    layer.fit_text();
+                }
+                sub.y = title.y + title.height + 36.;
+                let mut device = Layer::device(target, id(), height * 0.16);
+                device.x = width * 0.64;
+                Slide {
+                    background: gradient,
+                    layers: vec![title, sub, device],
+                }
+            }
+            Target::Search => {
+                let title = Layer::text(target, id(), headline, height * 0.07, 170., 800, "#ffffff");
+                let device = Layer::device(target, id(), title.y + title.height + 90.);
+                Slide {
+                    background: gradient,
+                    layers: vec![title, device],
+                }
+            }
         }
     }
 }

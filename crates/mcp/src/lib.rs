@@ -18,11 +18,14 @@ use serde_json::{Value, json};
 /// Newest first; an older client gets its own version back.
 const PROTOCOL_VERSIONS: &[&str] = &["2025-06-18", "2025-03-26", "2024-11-05"];
 
-const INSTRUCTIONS: &str = "AppDoctor designs App Store screenshots on the user's computer. \
-Each app has an iPhone design (canvas 1320 x 2868) and an iPad design (canvas 2064 x 2752): a row of \
-slides, each a background plus layers (text, device, image, shape) positioned in canvas pixels from the \
-top-left. Slides sit edge to edge, so a layer whose x runs past the canvas width continues onto the next \
-slide, which makes panoramas. Start with list_apps and get_design, use design_options and list_fonts for \
+const INSTRUCTIONS: &str = "AppDoctor designs App Store art on the user's computer. \
+Each app has four designs: iPhone screenshots (canvas 1320 x 2868), iPad screenshots (2064 x 2752), the \
+product page header (21:9, 3840 x 1646; keep words inside the middle, about 18% in from the sides and 15% \
+from top and bottom) and the search result art (3:2, 3840 x 2560). A design is a row of slides, each a \
+background plus layers (text, device, image, shape) positioned in canvas pixels from the top-left. Device \
+layers can be any iPhone or iPad from iPhone X to iPhone 18 Pro Max and the iPhone Duo. Screenshot slides \
+sit edge to edge, so a layer whose x runs past the canvas width continues onto the next slide, which makes \
+panoramas; header and search slides are alternative versions. Start with list_apps and get_design, use design_options and list_fonts for \
 allowed values, and look at your work with render_slide before you say it's done. The user sees every \
 change live in AppDoctor and can undo it.";
 

@@ -14,8 +14,8 @@ fn main() {
         .as_ref()
         .and_then(|shot| shot.parent().map(PathBuf::from))
         .unwrap_or_else(std::env::temp_dir);
-    for model in DeviceModel::ALL {
-        for frame in [Frame::Black, Frame::Silver, Frame::Orange, Frame::Clay, Frame::None] {
+    for model in DeviceModel::all() {
+        for frame in [Frame::Black, Frame::Silver] {
             let mut id = 0;
             let mut slide = Slide::starter(model.target(), "Plan your day in seconds", &mut id);
             let device = &mut slide.layers[2];
@@ -29,6 +29,8 @@ fn main() {
                 shadow: true,
             };
             let size = model.target().sizes()[0];
+            device.width = device.width.min(1000.);
+            device.height = device.width * model.aspect();
             let png = render_png(std::slice::from_ref(&slide), 0, size, &dir, 0.35).expect("render");
             std::fs::write(out.join(format!("{}-{}.png", model.slug(), frame.slug())), png).expect("write");
         }
