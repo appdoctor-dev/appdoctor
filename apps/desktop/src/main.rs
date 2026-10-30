@@ -20,6 +20,7 @@ mod services;
 mod state;
 mod theme;
 mod ui;
+mod updater;
 
 use gpui_kit::component::TitleBar;
 use gpui_kit::*;

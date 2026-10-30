@@ -19,6 +19,7 @@ use crate::entitlement::{self, Account};
 use crate::icons::IconCache;
 use crate::rank_check::{self, Outcome, Progress, now};
 use crate::services::Services;
+use crate::updater;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Section {
@@ -38,9 +39,17 @@ pub enum UpdateStatus {
     Unknown,
     Checking,
     Current,
+    /// Newer, but this copy can't install it itself: download it by hand.
     Available(UpdateInfo),
+    /// Downloading and installing in the background.
+    Installing(UpdateInfo),
+    /// Installed; a restart opens the new version.
+    Ready(UpdateInfo),
     Failed(String),
 }
+
+/// How often a running app looks for a new release, after the check at launch.
+const UPDATE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(6 * 60 * 60);
 
 pub struct AppState {
     pub services: Arc<Services>,
@@ -108,7 +117,7 @@ impl AppState {
             Some(id) => self.select_app(id, cx),
             None => self.section = Section::Apps,
         }
-        self.check_for_update(cx);
+        self.watch_for_updates(cx);
         if let appdoctor_entitlement::Status::Active {
             needs_refresh: true, ..
         } = self.account.status
@@ -390,9 +399,28 @@ impl AppState {
         })
     }
 
+    /// Looks for a new release now, then every few hours while the app runs.
+    fn watch_for_updates(&mut self, cx: &mut Context<Self>) {
+        self.check_for_update(cx);
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(UPDATE_INTERVAL).await;
+                if this.update(cx, |this, cx| this.check_for_update(cx)).is_err() {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// Checks for a new release. An official Mac build installs it straight
+    /// away; anything else announces it.
     pub fn check_for_update(&mut self, cx: &mut Context<Self>) {
+        if matches!(self.update, UpdateStatus::Installing(_) | UpdateStatus::Ready(_)) {
+            return;
+        }
         self.update = UpdateStatus::Checking;
-        let check = crate::runtime::spawn(entitlement::check_update(self.services.clone()));
+        let check = crate::runtime::spawn(updater::check());
         cx.spawn(async move |this, cx| {
             let status = match check.await {
                 Ok(Some(info)) => UpdateStatus::Available(info),
@@ -401,11 +429,47 @@ impl AppState {
             };
             this.update(cx, |this, cx| {
                 this.update = status;
+                if let UpdateStatus::Available(info) = &this.update
+                    && let Some(bundle) = updater::installable_bundle()
+                {
+                    this.install_update(info.clone(), bundle, cx);
+                }
                 cx.notify();
             })
             .ok();
         })
         .detach();
         cx.notify();
+    }
+
+    fn install_update(&mut self, info: UpdateInfo, bundle: std::path::PathBuf, cx: &mut Context<Self>) {
+        self.update = UpdateStatus::Installing(info.clone());
+        let install = crate::runtime::spawn(updater::install(info.clone(), bundle));
+        cx.spawn(async move |this, cx| {
+            let result = install.await;
+            this.update(cx, |this, cx| {
+                this.update = match result {
+                    Ok(()) => UpdateStatus::Ready(info),
+                    Err(error) => {
+                        // Fall back to a manual download rather than retrying
+                        // something that may keep failing (a read-only folder).
+                        tracing::warn!("couldn't install update {}: {error:#}", info.version);
+                        UpdateStatus::Available(info)
+                    }
+                };
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Quits and opens the installed update.
+    pub fn restart_to_update(cx: &mut gpui_kit::App) {
+        let Some(bundle) = updater::installable_bundle() else { return };
+        match updater::relaunch(&bundle) {
+            Ok(()) => cx.quit(),
+            Err(error) => tracing::warn!("couldn't relaunch: {error:#}"),
+        }
     }
 }

@@ -778,7 +778,30 @@ impl SettingsView {
             UpdateStatus::Unknown | UpdateStatus::Checking => (theme.muted_foreground, "Checking…".to_owned()),
             UpdateStatus::Current => (meter::up(), "Up to date".to_owned()),
             UpdateStatus::Available(info) => (theme.primary, format!("{} is available", info.version)),
+            UpdateStatus::Installing(info) => (theme.primary, format!("Installing {}…", info.version)),
+            UpdateStatus::Ready(info) => (theme.primary, format!("{} is installed. Restart to use it.", info.version)),
             UpdateStatus::Failed(_) => (theme.muted_foreground, "Couldn't reach the update server".to_owned()),
+        };
+        let update_button = match &state.update {
+            UpdateStatus::Available(info) => {
+                let url = info.url.clone();
+                Button::new("download-update")
+                    .small()
+                    .label("Download")
+                    .on_click(move |_, _, cx| cx.open_url(&url))
+            }
+            UpdateStatus::Ready(_) => Button::new("restart-update")
+                .small()
+                .primary()
+                .label("Restart")
+                .on_click(|_, _, cx| crate::state::AppState::restart_to_update(cx)),
+            status => Button::new("check-update")
+                .small()
+                .label("Check Now")
+                .disabled(matches!(status, UpdateStatus::Checking | UpdateStatus::Installing(_)))
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.state.update(cx, |state, cx| state.check_for_update(cx))
+                })),
         };
         let secondary = |text: String| {
             div()
@@ -797,14 +820,7 @@ impl SettingsView {
                     .items_center()
                     .child(status_dot(color))
                     .child(secondary(update))
-                    .child(
-                        Button::new("check-update")
-                            .small()
-                            .label("Check Now")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.state.update(cx, |state, cx| state.check_for_update(cx))
-                            })),
-                    ),
+                    .child(update_button),
                 cx,
             )
             .into_any_element(),

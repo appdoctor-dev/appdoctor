@@ -17,6 +17,10 @@
 #   APPLE_API_KEY_ID            its key ID
 #   APPLE_API_ISSUER            its issuer ID
 # Without them the app is signed ad hoc, and macOS asks before opening it.
+#
+# Automatic updates need UPDATE_SIGNING_KEY (apps/desktop/scripts/update-signing-key.sh
+# sets it). The release then carries latest.json, which installed apps read to
+# find, verify and install the new version.
 name: Release
 
 on:
@@ -73,6 +77,9 @@ jobs:
         with:
           key: ${{ matrix.target }}
       - name: Build
+        env:
+          # Lets the macOS app install updates itself (see apps/desktop/src/updater.rs).
+          APPDOCTOR_OFFICIAL_BUILD: "1"
         run: cargo build --release --locked -p appdoctor-desktop --target ${{ matrix.target }}
       - uses: actions/upload-artifact@v4
         with:
@@ -164,6 +171,28 @@ jobs:
           pattern: release-*
           merge-multiple: true
           path: dist
+      - name: Sign the update manifest
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: |
+          if [[ -z "$UPDATE_SIGNING_KEY" ]]; then
+            echo "::warning::UPDATE_SIGNING_KEY isn't set, so installed apps won't update themselves to this release."
+            exit 0
+          fi
+          key="$RUNNER_TEMP/update.pem"
+          printf '%s\n' "$UPDATE_SIGNING_KEY" > "$key"
+          base="https://github.com/$GH_REPO/releases/download/$TAG"
+          entry() {
+            jq -n --arg url "$base/$(basename "$1")" --argjson size "$(stat -c %s "$1")" \
+              --arg signature "$(openssl pkeyutl -sign -rawin -inkey "$key" -in "$1" | base64 -w0)" \
+              '{url: $url, size: $size, signature: $signature}'
+          }
+          jq -n --arg version "$VERSION" \
+            --argjson macos "$(entry dist/AppDoctor-macOS.dmg)" \
+            --argjson windows "$(entry dist/AppDoctor-Windows-x64.zip)" \
+            '{version: $version, platforms: {macos: $macos, windows: $windows}}' > dist/latest.json
+          rm "$key"
+          cat dist/latest.json
       - name: Publish
         run: |
           # A draft left from a test run would block this tag; replace it.
@@ -172,5 +201,7 @@ jobs:
           fi
           draft=()
           [[ "$GITHUB_REF_TYPE" == "tag" ]] || draft=(--draft)
-          gh release create "$TAG" dist/AppDoctor-macOS.dmg dist/AppDoctor-Windows-x64.zip \
+          files=(dist/AppDoctor-macOS.dmg dist/AppDoctor-Windows-x64.zip)
+          [[ -f dist/latest.json ]] && files+=(dist/latest.json)
+          gh release create "$TAG" "${files[@]}" \
             --title "AppDoctor $VERSION" --generate-notes --target "$GITHUB_SHA" "${draft[@]}"

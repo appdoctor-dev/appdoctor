@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use appdoctor_entitlement::{ApiClient, DeviceCode, DeviceInfo, SignInError, Status, UpdateInfo};
+use appdoctor_entitlement::{ApiClient, DeviceCode, DeviceInfo, SignInError, Status};
 use appdoctor_secrets::Secret;
 
 use crate::rank_check::now;
@@ -90,16 +90,6 @@ pub fn sign_out(services: &Services) -> anyhow::Result<()> {
     services.vault.delete(Secret::AccountToken)?;
     services.vault.delete(Secret::Entitlement)?;
     Ok(())
-}
-
-pub async fn check_update(services: Arc<Services>) -> anyhow::Result<Option<UpdateInfo>> {
-    Ok(api(&services)
-        .check_update(
-            appdoctor_entitlement::platform(),
-            appdoctor_entitlement::arch(),
-            env!("CARGO_PKG_VERSION"),
-        )
-        .await?)
 }
 
 /// A human name for this computer, shown in the account's device list.

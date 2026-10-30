@@ -369,10 +369,11 @@ impl Shell {
                     .border_color(theme.sidebar_border)
                     .when_some(
                         match update {
-                            UpdateStatus::Available(info) => Some(info.version),
+                            UpdateStatus::Available(info) => Some((format!("Update to {}", info.version), false)),
+                            UpdateStatus::Ready(_) => Some(("Restart to Update".to_owned(), true)),
                             _ => None,
                         },
-                        |this, version| {
+                        |this, (label, ready)| {
                             this.child(
                                 h_flex()
                                     .id("sidebar-update")
@@ -386,8 +387,14 @@ impl Shell {
                                     .bg(theme.primary.opacity(0.1))
                                     .cursor_pointer()
                                     .child(Icon::new(IconName::ArrowUp).xsmall())
-                                    .child(format!("Update to {version}"))
-                                    .on_click(cx.listener(|this, _, _, cx| this.go(Section::Settings, cx))),
+                                    .child(label)
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        if ready {
+                                            crate::state::AppState::restart_to_update(cx);
+                                        } else {
+                                            this.go(Section::Settings, cx);
+                                        }
+                                    })),
                             )
                         },
                     )
