@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers"
+import { SITE } from "#/content/site"
 
 export type PublicPlan = {
   id: string
@@ -12,7 +13,8 @@ export type PublicPlan = {
   maxDevices: number
 }
 
-export type LatestBuild = { platform: "macos" | "windows"; arch: "arm64" | "x64"; version: string; size: number; notes: string }
+/** The newest GitHub release and its downloads. The asset names never change (see .github/workflows/release.yml). */
+export type LatestRelease = { version: string; notes: string; mac: string; windows: string }
 
 export const siteUrl = () => env.SITE_URL
 export const appUrl = () => (env as { APP_URL?: string }).APP_URL
@@ -34,4 +36,29 @@ async function apiGet<T>(path: string, fallback: T): Promise<T> {
 }
 
 export const fetchPlans = () => apiGet<PublicPlan[]>("/v1/plans", [])
-export const fetchLatestBuilds = () => apiGet<LatestBuild[]>("/v1/releases/latest", [])
+
+/**
+ * github.com redirects /releases/latest to the newest release's tag, which
+ * avoids the GitHub API's rate limit; the edge keeps the answer for five
+ * minutes. `null` until the first release is published.
+ */
+export async function fetchLatestRelease(): Promise<LatestRelease | null> {
+  try {
+    const res = await fetch(`${SITE.sourceUrl}/releases/latest`, {
+      redirect: "manual",
+      cf: { cacheEverything: true, cacheTtlByStatus: { "200-399": 300, "400-599": 60 } },
+    })
+    const tag = res.headers.get("location")?.match(/\/releases\/tag\/(v[^/?#]+)$/)?.[1]
+    if (!tag) return null
+    const download = `${SITE.sourceUrl}/releases/download/${tag}`
+    return {
+      version: tag.slice(1),
+      notes: `${SITE.sourceUrl}/releases/tag/${tag}`,
+      mac: `${download}/AppDoctor-macOS.dmg`,
+      windows: `${download}/AppDoctor-Windows-x64.zip`,
+    }
+  } catch (error) {
+    console.error("[web] latest release lookup failed:", error instanceof Error ? error.message : error)
+    return null
+  }
+}

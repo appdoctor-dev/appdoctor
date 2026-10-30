@@ -10,7 +10,6 @@ export const SITE = {
   title: "AppDoctor: ASO keyword research tool for the App Store",
   description:
     "AppDoctor is an ASO keyword research tool for Mac and Windows. Find App Store keywords with Apple's own popularity score, track your rank in every country, audit your listing and let your own AI improve it. Your data stays on your computer.",
-  // TODO: set to the public repository once it exists.
   sourceUrl: "https://github.com/appdoctor-dev/appdoctor",
   email: "hello@appdoctor.so",
 }

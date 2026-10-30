@@ -3,7 +3,7 @@ import { DOCS, POSTS, type Entry } from "#/content/collections"
 import { GUIDES, type Block, type Guide } from "#/content/guides"
 import { FAQ, FEATURES, PRIVACY_POINTS, SITE } from "#/content/site"
 import { money } from "#/lib/format"
-import { fetchLatestBuilds, fetchPlans } from "./api"
+import { fetchLatestRelease, fetchPlans } from "./api"
 
 // Everything an AI agent or crawler reads, built per request from the same
 // content the pages render:
@@ -174,14 +174,22 @@ async function pricingMarkdown() {
 }
 
 async function downloadMarkdown() {
-  const builds = await fetchLatestBuilds()
-  const lines = builds.map((b) => `- ${b.platform === "macos" ? "macOS" : "Windows"} (${b.arch}): version ${b.version}`)
+  const release = await fetchLatestRelease()
   return [
     `# Download ${SITE.name}`,
     "",
-    lines.length ? lines.join("\n") : "The first release is on its way.",
+    release
+      ? [
+          `Version ${release.version}:`,
+          "",
+          `- [Mac (Apple silicon and Intel, macOS 13 or later)](${release.mac})`,
+          `- [Windows (10 or 11, 64-bit)](${release.windows})`,
+          "",
+          `[What's new](${release.notes}). The Mac app keeps itself up to date.`,
+        ].join("\n")
+      : "The first release is on its way.",
     "",
-    `Downloads are on ${"the download page"}; a subscription is needed to use the signed app. Source: ${SITE.sourceUrl}`,
+    `A subscription is needed to use the signed app. Source and all releases: ${SITE.sourceUrl}`,
     "",
   ].join("\n")
 }

@@ -3,9 +3,11 @@ import { AppWindow, type View } from "#/components/app-window"
 import { Mark, buttonClass } from "#/components/chrome"
 import { KEYWORD_RESEARCH } from "#/content/guides"
 import { FAQ, SITE } from "#/content/site"
+import { getLatestRelease } from "#/lib/data.functions"
 import { faqPage } from "#/lib/jsonld"
 
 export const Route = createFileRoute("/")({
+  loader: () => getLatestRelease(),
   head: () => ({
     meta: [
       { property: "og:title", content: SITE.title },
@@ -56,15 +58,26 @@ const SECTIONS: { id: string; title: string; body: string; more: { to: string; l
   },
 ]
 
+/** Straight to the newest release's files; to the download page until there is one. */
 function Downloads({ size = "lg" }: { size?: "md" | "lg" }) {
+  const release = Route.useLoaderData()
+  const buttons = [
+    { label: "Download for Mac", href: release?.mac, variant: "primary" },
+    { label: "Download for Windows", href: release?.windows, variant: "secondary" },
+  ] as const
   return (
     <div className="flex flex-wrap justify-center gap-3">
-      <Link to="/download" className={buttonClass("primary", size)}>
-        Download for Mac
-      </Link>
-      <Link to="/download" className={buttonClass("secondary", size)}>
-        Download for Windows
-      </Link>
+      {buttons.map((b) =>
+        b.href ? (
+          <a key={b.label} href={b.href} className={buttonClass(b.variant, size)}>
+            {b.label}
+          </a>
+        ) : (
+          <Link key={b.label} to="/download" className={buttonClass(b.variant, size)}>
+            {b.label}
+          </Link>
+        ),
+      )}
     </div>
   )
 }
@@ -84,7 +97,9 @@ function Home() {
         <div className="mt-9">
           <Downloads />
         </div>
-        <p className="mt-5 text-[13px] text-ink-soft">For macOS and Windows. Your keywords stay on your computer.</p>
+        <p className="mt-5 text-[13px] text-ink-soft">
+          For Macs with Apple silicon or Intel, and Windows. Your keywords stay on your computer.
+        </p>
         <div className="mx-auto mt-16 max-w-[1200px] rounded-[28px] bg-surface p-[clamp(10px,2.6vw,36px)] sm:rounded-[40px]">
           <AppWindow start="keywords" label="AppDoctor's keyword research, with example data" />
         </div>

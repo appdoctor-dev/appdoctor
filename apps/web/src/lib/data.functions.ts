@@ -1,9 +1,9 @@
 import { createServerFn } from "@tanstack/react-start"
 import { DOCS, POSTS, headingsOf, renderMarkdown } from "#/content/collections"
-import { fetchLatestBuilds, fetchPlans } from "#/server/api"
+import { fetchLatestRelease, fetchPlans } from "#/server/api"
 
 export const getPlans = createServerFn({ method: "GET" }).handler(() => fetchPlans())
-export const getLatestBuilds = createServerFn({ method: "GET" }).handler(() => fetchLatestBuilds())
+export const getLatestRelease = createServerFn({ method: "GET" }).handler(() => fetchLatestRelease())
 
 const meta = ({ markdown: _markdown, ...rest }: (typeof POSTS)[number]) => rest
 
