@@ -17,7 +17,8 @@ shift 2
 APP="$OUT/AppDoctor.app"
 DMG="$OUT/AppDoctor-macOS.dmg"
 rm -rf "$APP" "$DMG"
-mkdir -p "$APP/Contents/MacOS"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+cp "$(dirname "$0")/../assets/app-icon/AppIcon.icns" "$APP/Contents/Resources/"
 
 lipo -create -output "$APP/Contents/MacOS/appdoctor" "$@"
 # CI artifacts lose the executable bit on the way between jobs.
@@ -30,6 +31,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <plist version="1.0">
 <dict>
   <key>CFBundleExecutable</key><string>appdoctor</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundleIdentifier</key><string>app.appdoctor.desktop</string>
   <key>CFBundleName</key><string>AppDoctor</string>
   <key>CFBundleDisplayName</key><string>AppDoctor</string>

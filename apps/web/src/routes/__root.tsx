@@ -23,13 +23,15 @@ export const Route = createRootRoute({
       { property: "og:type", content: "website" },
       { property: "og:url", content: canonical },
       { name: "twitter:card", content: "summary" },
-      { name: "theme-color", content: "#0f1b2d" },
+      { name: "theme-color", content: "#ffffff" },
       ...(isPrivate ? [{ name: "robots", content: "noindex" }] : []),
     ],
     links: [
       { rel: "stylesheet", href: appCss },
       { rel: "manifest", href: "/manifest.webmanifest" },
       { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },
+      { rel: "icon", href: "/favicon.ico", sizes: "48x48" },
+      { rel: "apple-touch-icon", href: "/apple-touch-icon.png" },
       { rel: "alternate", type: "application/rss+xml", title: `${SITE.name} blog`, href: "/blog/rss.xml" },
       { rel: "help", type: "text/plain", href: "/llms.txt" },
       // The same page as Markdown, for agents (also in the Link header).

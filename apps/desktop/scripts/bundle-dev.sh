@@ -8,7 +8,8 @@ cd "$(dirname "$0")/../../.."
 
 cargo build -p appdoctor-desktop "$@"
 APP=target/debug/AppDoctor.app
-mkdir -p "$APP/Contents/MacOS"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+cp apps/desktop/assets/app-icon/AppIcon.icns "$APP/Contents/Resources/"
 # Copy then rename: overwriting a running binary in place can get it killed
 # for an invalid code signature; a rename leaves the running copy intact.
 cp target/debug/appdoctor "$APP/Contents/MacOS/appdoctor.new"
@@ -20,6 +21,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <plist version="1.0">
 <dict>
   <key>CFBundleExecutable</key><string>appdoctor</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundleIdentifier</key><string>app.appdoctor.desktop.dev</string>
   <key>CFBundleName</key><string>AppDoctor</string>
   <key>CFBundleDisplayName</key><string>AppDoctor</string>

@@ -335,9 +335,14 @@ function manifest() {
     description: SITE.description,
     start_url: "/",
     display: "browser",
-    background_color: "#f6f7f9",
-    theme_color: "#0f1b2d",
-    icons: [{ src: "/favicon.svg", type: "image/svg+xml", sizes: "any" }],
+    background_color: "#ffffff",
+    theme_color: "#ffffff",
+    icons: [
+      { src: "/favicon.svg", type: "image/svg+xml", sizes: "any" },
+      { src: "/icon-192.png", type: "image/png", sizes: "192x192" },
+      { src: "/icon-512.png", type: "image/png", sizes: "512x512" },
+      { src: "/icon-maskable-512.png", type: "image/png", sizes: "512x512", purpose: "maskable" },
+    ],
   })
 }
 

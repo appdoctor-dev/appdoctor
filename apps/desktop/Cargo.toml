@@ -43,3 +43,7 @@ tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 uuid.workspace = true
+
+[build-dependencies]
+# Embeds the Windows icon in appdoctor.exe (build.rs); unused on macOS.
+winresource = "0.1"

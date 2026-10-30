@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#B19CFF"/>
+      <stop offset="0.5" stop-color="#6A45F0"/>
+      <stop offset="1" stop-color="#3518A8"/>
+    </linearGradient>
+    <radialGradient id="bloom" cx="0.5" cy="0.35" r="0.55">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#E6E0FF"/>
+    </linearGradient>
+    <linearGradient id="bar1" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#CFC4FF"/><stop offset="1" stop-color="#8E78FF"/></linearGradient>
+    <linearGradient id="bar2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#9C86FF"/><stop offset="1" stop-color="#5734E6"/></linearGradient>
+    <linearGradient id="bar3" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#A6FFDA"/><stop offset="1" stop-color="#16B872"/></linearGradient>
+    <linearGradient id="metal" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="0.4" stop-color="#D7DAF0"/>
+      <stop offset="0.7" stop-color="#8F95C2"/>
+      <stop offset="1" stop-color="#E9EBFA"/>
+    </linearGradient>
+    <radialGradient id="drum" cx="0.4" cy="0.35" r="0.7">
+      <stop offset="0" stop-color="#F2FFF9"/>
+      <stop offset="0.55" stop-color="#7DF2BF"/>
+      <stop offset="1" stop-color="#14A866"/>
+    </radialGradient>
+    <linearGradient id="tube" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2C2085"/>
+      <stop offset="1" stop-color="#1A1158"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.5"/>
+      <stop offset="0.25" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="drop" x="-10%" y="-10%" width="120%" height="125%"><feDropShadow dy="14" stdDeviation="14" flood-color="#000" flood-opacity="0.35"/></filter>
+    <filter id="lift" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dy="22" stdDeviation="22" flood-color="#1C0B5E" flood-opacity="0.45"/></filter>
+    <filter id="liftSmall" x="-30%" y="-30%" width="160%" height="170%"><feDropShadow dy="12" stdDeviation="12" flood-color="#14084A" flood-opacity="0.5"/></filter>
+    <clipPath id="tile"><rect x="100" y="100" width="824" height="824" rx="185"/></clipPath>
+  </defs>
+
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)" filter="url(#drop)"/>
+  <g clip-path="url(#tile)">
+    <rect x="100" y="100" width="824" height="824" fill="url(#bloom)"/>
+
+    <g filter="url(#lift)">
+      <rect x="262" y="236" width="440" height="440" rx="104" fill="url(#card)"/>
+    </g>
+    <rect x="262" y="236" width="440" height="440" rx="104" fill="none" stroke="#FFFFFF" stroke-width="3" opacity="0.8"/>
+    <rect x="322" y="482" width="78" height="128" rx="39" fill="url(#bar1)"/>
+    <rect x="443" y="396" width="78" height="214" rx="39" fill="url(#bar2)"/>
+    <rect x="564" y="300" width="78" height="310" rx="39" fill="url(#bar3)"/>
+    <rect x="578" y="316" width="16" height="120" rx="8" fill="#FFFFFF" opacity="0.55"/>
+
+    <path d="M60 300 C 200 330, 170 600, 300 760 C 400 880, 560 860, 622 772" fill="none" stroke="url(#tube)" stroke-width="38" stroke-linecap="round" filter="url(#liftSmall)"/>
+    <path d="M60 290 C 196 320, 162 590, 292 752 C 392 870, 552 850, 612 766" fill="none" stroke="#8C7CFF" stroke-width="8" stroke-linecap="round" opacity="0.55"/>
+    <circle cx="628" cy="760" r="30" fill="url(#metal)"/>
+
+    <g filter="url(#liftSmall)">
+      <circle cx="712" cy="682" r="112" fill="url(#metal)"/>
+    </g>
+    <circle cx="712" cy="682" r="84" fill="url(#drum)"/>
+    <circle cx="712" cy="682" r="84" fill="none" stroke="#0F7A4B" stroke-width="4" opacity="0.35"/>
+    <path d="M650 640 A 70 70 0 0 1 700 610" fill="none" stroke="#FFFFFF" stroke-width="12" stroke-linecap="round" opacity="0.8"/>
+  </g>
+  <rect x="101.5" y="101.5" width="821" height="821" rx="184" fill="none" stroke="url(#rim)" stroke-width="3"/>
+</svg>

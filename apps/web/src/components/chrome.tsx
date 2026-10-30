@@ -119,17 +119,9 @@ export function SiteFooter() {
   )
 }
 
-/** The app's icon: a search magnifier with a pulse through it, on the app's indigo. */
+/** The app's icon: a stethoscope checking an app's rising chart. */
 export function Mark({ className = "size-7" }: { className?: string }) {
-  return (
-    <span className={`grid shrink-0 place-items-center rounded-[24%] bg-[linear-gradient(155deg,#6d6bf2,#4a49d4)] shadow-[inset_0_0_0_0.5px_rgb(0_0_0/0.2)] ${className}`} aria-hidden="true">
-      <svg viewBox="0 0 24 24" className="size-[62%]">
-        <circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="#fff" strokeWidth="2.2" />
-        <path d="M15.4 15.4 20 20" stroke="#fff" strokeWidth="2.6" strokeLinecap="round" />
-        <path d="M6.2 11h2l1.3-2.8 1.9 5.4 1.3-2.6h1.6" fill="none" stroke="#a7f3c8" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    </span>
-  )
+  return <img src="/favicon.svg" alt="" aria-hidden="true" className={`shrink-0 ${className}`} />
 }
 
 export function buttonClass(variant: "primary" | "secondary" | "plain" = "primary", size: "sm" | "md" | "lg" = "md") {
