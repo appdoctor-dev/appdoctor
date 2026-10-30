@@ -1,0 +1,176 @@
+# Builds the desktop app for macOS (one universal .dmg) and Windows (.zip) and
+# attaches both to a GitHub release.
+#
+# - Push a tag that matches the version in Cargo.toml (v0.2.0) to publish a
+#   release.
+# - Run it by hand (Actions → Release → Run workflow) for a draft release you
+#   can test before anyone sees it.
+#
+# The asset names never change, so .../releases/latest/download/AppDoctor-macOS.dmg
+# always fetches the newest build; appdoctor.so's download buttons use them.
+#
+# macOS signing and notarization turn on when these repository secrets exist:
+#   APPLE_CERTIFICATE           base64 of your "Developer ID Application" .p12
+#   APPLE_CERTIFICATE_PASSWORD  the .p12's password
+#   APPLE_SIGNING_IDENTITY      e.g. "Developer ID Application: Jane Doe (TEAMID)"
+#   APPLE_API_KEY               an App Store Connect API key (.p8 file contents)
+#   APPLE_API_KEY_ID            its key ID
+#   APPLE_API_ISSUER            its issuer ID
+# Without them the app is signed ad hoc, and macOS asks before opening it.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: version
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "::error::The tag $GITHUB_REF_NAME doesn't match the version in Cargo.toml ($version)."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-15, target: aarch64-apple-darwin, bin: appdoctor }
+          - { os: macos-15, target: x86_64-apple-darwin, bin: appdoctor }
+          - { os: windows-2025, target: x86_64-pc-windows-msvc, bin: appdoctor.exe }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        run: |
+          channel=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)
+          rustup toolchain install "$channel" --profile minimal --target ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - name: Build
+        run: cargo build --release --locked -p appdoctor-desktop --target ${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bin-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/${{ matrix.bin }}
+          if-no-files-found: error
+
+  macos:
+    needs: [version, build]
+    runs-on: macos-15
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      SIGN: ${{ secrets.APPLE_CERTIFICATE != '' }}
+      NOTARIZE: ${{ secrets.APPLE_API_KEY != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bin-*-apple-darwin
+      - name: Import the signing certificate
+        if: env.SIGN == 'true'
+        env:
+          CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          keychain_password=$(openssl rand -base64 24)
+          echo "$CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$keychain" -P "$PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain"
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/certificate.p12"
+      - name: Bundle
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ env.SIGN == 'true' && secrets.APPLE_SIGNING_IDENTITY || '' }}
+        run: |
+          apps/desktop/scripts/package-macos.sh "$VERSION" dist \
+            bin-aarch64-apple-darwin/appdoctor bin-x86_64-apple-darwin/appdoctor
+      - name: Notarize
+        if: env.SIGN == 'true' && env.NOTARIZE == 'true'
+        env:
+          API_KEY: ${{ secrets.APPLE_API_KEY }}
+          API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          printf '%s' "$API_KEY" > "$RUNNER_TEMP/notary.p8"
+          xcrun notarytool submit dist/AppDoctor-macOS.dmg --wait \
+            --key "$RUNNER_TEMP/notary.p8" --key-id "$API_KEY_ID" --issuer "$API_ISSUER"
+          xcrun stapler staple dist/AppDoctor-macOS.dmg
+          rm "$RUNNER_TEMP/notary.p8"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-macos
+          path: dist/AppDoctor-macOS.dmg
+          if-no-files-found: error
+
+  windows:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: bin-x86_64-pc-windows-msvc
+      - name: Zip
+        run: |
+          mkdir dist
+          mv appdoctor.exe AppDoctor.exe
+          zip -9 dist/AppDoctor-Windows-x64.zip AppDoctor.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: dist/AppDoctor-Windows-x64.zip
+          if-no-files-found: error
+
+  release:
+    needs: [version, macos, windows]
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: v${{ needs.version.outputs.version }}
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: dist
+      - name: Publish
+        run: |
+          # A draft left from a test run would block this tag; replace it.
+          if [[ "$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null)" == "true" ]]; then
+            gh release delete "$TAG" --yes
+          fi
+          draft=()
+          [[ "$GITHUB_REF_TYPE" == "tag" ]] || draft=(--draft)
+          gh release create "$TAG" dist/AppDoctor-macOS.dmg dist/AppDoctor-Windows-x64.zip \
+            --title "AppDoctor $VERSION" --generate-notes --target "$GITHUB_SHA" "${draft[@]}"

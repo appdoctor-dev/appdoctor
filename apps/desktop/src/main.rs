@@ -5,6 +5,11 @@
 //! and only then start async work, from the window handle (see the gpui
 //! traps in Cap's desktop-gpui README).
 
+// Release builds on Windows open without a console window behind the app.
+// `appdoctor mcp` still talks over stdio: MCP clients start it with pipes,
+// which a GUI-subsystem process inherits.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 mod assets;
 mod discover;
 mod entitlement;
