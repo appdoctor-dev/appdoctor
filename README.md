@@ -42,7 +42,7 @@ The [Release workflow](.github/workflows/release.yml) builds one universal Mac a
 
 Running the workflow by hand (Actions → Release → Run workflow) makes a draft release to try first.
 
-Mac apps from a release look for a new one at launch and every six hours. They download it, check its signature against the key built into the app, install it over themselves and show **Restart to Update**. Windows apps show the new version with a Download button for now. To sign and notarize the Mac app, add the Apple secrets listed at the top of the workflow.
+Mac apps from a release look for a new one at launch and every six hours. They download it, check its signature against the key built into the app, install it over themselves and show **Restart to Update**. Windows apps show the new version with a Download button for now. To sign and notarize the Mac app, export your Developer ID Application certificate from Keychain Access as a `.p12`, download an App Store Connect team API key (`.p8`), then run `apps/desktop/scripts/apple-signing-secrets.sh <certificate.p12> <AuthKey_….p8>`.
 
 ## Run the website, API and admin locally
 

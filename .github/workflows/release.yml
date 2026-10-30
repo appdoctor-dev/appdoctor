@@ -9,7 +9,8 @@
 # The asset names never change, so .../releases/latest/download/AppDoctor-macOS.dmg
 # always fetches the newest build; appdoctor.so's download buttons use them.
 #
-# macOS signing and notarization turn on when these repository secrets exist:
+# macOS signing and notarization turn on when these repository secrets exist
+# (apps/desktop/scripts/apple-signing-secrets.sh sets them all):
 #   APPLE_CERTIFICATE           base64 of your "Developer ID Application" .p12
 #   APPLE_CERTIFICATE_PASSWORD  the .p12's password
 #   APPLE_SIGNING_IDENTITY      e.g. "Developer ID Application: Jane Doe (TEAMID)"
