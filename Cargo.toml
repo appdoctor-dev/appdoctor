@@ -28,6 +28,7 @@ appdoctor-secrets = { path = "crates/secrets" }
 appdoctor-jwt = { path = "crates/jwt" }
 appdoctor-screenshots = { path = "crates/screenshots" }
 appdoctor-mcp = { path = "crates/mcp" }
+appdoctor-audit = { path = "crates/audit" }
 appdoctor-video = { path = "crates/video" }
 appdoctor-ai = { path = "crates/ai" }
 

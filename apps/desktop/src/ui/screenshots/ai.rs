@@ -179,6 +179,7 @@ fn describe(name: &str, input: &Value) -> (Glyph, String, String) {
         "list_apps" => pair(Glyph::Apps, "Checking", "Checked", "your apps".into()),
         "get_keywords" => pair(Glyph::Search, "Checking", "Checked", "your keywords and ranks".into()),
         "get_listing" => pair(Glyph::Read, "Reading", "Read", "your listing".into()),
+        "aso_audit" => pair(Glyph::Look, "Auditing", "Audited", "your App Store page".into()),
         "suggest_listing" => pair(
             Glyph::Draw,
             "Suggesting",
@@ -457,6 +458,8 @@ pub(crate) struct AiPanel {
     /// A folder that looks like the app's code, for an app without one.
     suggestion: Option<(u64, PathBuf)>,
     looked_for: Option<u64>,
+    /// A request to send once the providers are found.
+    pending: Option<String>,
     _run: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
@@ -518,6 +521,7 @@ impl AiPanel {
             tick: Instant::now(),
             suggestion: None,
             looked_for: None,
+            pending: None,
             _run: None,
             _subscriptions: subscriptions,
         };
@@ -546,6 +550,9 @@ impl AiPanel {
                     .or_else(|| found.first().map(|f| f.provider));
                 this.found = found;
                 this.load_choices(cx);
+                if let Some(prompt) = this.pending.take() {
+                    this.ask_now(prompt, cx);
+                }
                 cx.notify();
             })
             .ok();
@@ -746,6 +753,19 @@ impl AiPanel {
         }
         self.prompt.update(cx, |state, cx| state.set_value("", window, cx));
         self.ask(prompt, cx);
+    }
+
+    /// Sends a request from elsewhere in the app (the audit's Fix with AI),
+    /// as soon as an AI is ready.
+    pub(crate) fn ask_now(&mut self, prompt: String, cx: &mut Context<Self>) {
+        if self.running {
+            return;
+        }
+        if self.detecting || self.found.is_empty() {
+            self.pending = Some(prompt);
+        } else if self.can_send() {
+            self.ask(prompt, cx);
+        }
     }
 
     fn ask(&mut self, prompt: String, cx: &mut Context<Self>) {

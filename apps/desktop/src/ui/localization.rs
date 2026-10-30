@@ -980,17 +980,27 @@ impl Render for LocalizationView {
             return widgets::empty_state(IconName::Inbox, "No app selected", "Pick an app in the sidebar.", cx)
                 .into_any_element();
         };
+        // A request from the audit: open the chat with it.
+        if let Some(prompt) = self.state.update(cx, |state, _| state.ai_request.take()) {
+            self.ai_open = true;
+            self.ai.update(cx, |ai, cx| ai.ask_now(prompt, cx));
+        }
         if !services.has_asc_key() {
-            return widgets::empty_state(
+            // The AI can still suggest; saving needs the key.
+            let connect = widgets::empty_state(
                 gpui_kit::assets::IconName::Languages,
                 "Connect App Store Connect",
-                "Add your App Store Connect API key in Settings to edit your App Store metadata in every language from here.",
+                "Add your App Store Connect API key in Settings to edit your App Store metadata in every language from here, and to save what your AI suggests.",
                 cx,
             )
             .child(Button::new("loc-settings").primary().label("Open Settings").on_click(cx.listener(|this, _, _, cx| {
                 this.state.update(cx, |state, cx| state.set_section(Section::Settings, cx))
-            })))
-            .into_any_element();
+            })));
+            return h_flex()
+                .size_full()
+                .child(div().flex_1().min_w_0().h_full().child(connect))
+                .when(self.ai_open, |this| this.child(self.ai.clone()))
+                .into_any_element();
         }
         // Reading the listing changes nothing, so it loads on arrival.
         if self.loaded.is_none() && !self.loading && self.auto_loaded != Some(app.id) {

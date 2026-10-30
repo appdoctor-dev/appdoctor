@@ -366,8 +366,8 @@ pub fn listing_context(app: &str, app_id: u64, countries: &[String], project: Op
     let countries = if countries.is_empty() { "us".to_owned() } else { countries.join(", ") };
     format!(
         "You are working inside AppDoctor, a Mac app for App Store optimization, on the App Store listing of \
-         \"{app}\" (app_id {app_id}), which the user tracks in these storefronts: {countries}. {project} Start with \
-         get_keywords (the tracked keywords with ranks, Apple popularity and difficulty per country) and get_listing \
+         \"{app}\" (app_id {app_id}), which the user tracks in these storefronts: {countries}. {project} aso_audit \
+         scores the whole product page and lists what to fix first. Start with get_keywords (the tracked keywords with ranks, Apple popularity and difficulty per country) and get_listing \
          (the listing as pulled from App Store Connect, with which tracked keywords it covers and misses). Then \
          suggest changes with suggest_listing, one language at a time, with a short note on why. Suggestions don't \
          change the App Store: the user reviews them in AppDoctor and saves them with their own App Store Connect \

@@ -2,6 +2,7 @@
 
 mod app_search;
 mod apps;
+mod audit;
 mod competitors;
 mod controls;
 mod keyword_table;

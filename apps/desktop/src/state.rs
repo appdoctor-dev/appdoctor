@@ -23,6 +23,7 @@ use crate::services::Services;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Section {
     Apps,
+    Audit,
     Keywords,
     Rankings,
     Competitors,
@@ -51,6 +52,9 @@ pub struct AppState {
     pub selected_app: Option<u64>,
     /// The storefront the keyword table shows and new keywords go to.
     pub country: String,
+    /// A request for the AI beside Localization, from another screen
+    /// (the audit's Fix with AI); Localization takes it and opens the chat.
+    pub ai_request: Option<String>,
     /// All keywords of the selected app, every storefront.
     pub keywords: Vec<KeywordRow>,
     keyword_counts: HashMap<u64, usize>,
@@ -76,6 +80,7 @@ impl AppState {
             apps: Vec::new(),
             selected_app: None,
             country: "us".into(),
+            ai_request: None,
             keywords: Vec::new(),
             keyword_counts: HashMap::new(),
             countries: HashMap::new(),

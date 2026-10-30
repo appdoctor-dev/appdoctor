@@ -50,6 +50,14 @@ pub(crate) fn tools() -> Vec<Value> {
             true,
         ),
         tool(
+            "aso_audit",
+            "Audit the app",
+            "An App Store optimization audit: a score out of 100, a score for each area (listing text, keywords, screenshots and video, ratings and updates, countries and languages) and findings, worst first, each saying what to do. It uses the live App Store page as AppDoctor last saw it, the listing Localization pulled, the tracked keywords and the app's designs. Fix listing findings with suggest_listing and visual ones with the design tools.",
+            app.clone(),
+            &["app_id"],
+            true,
+        ),
+        tool(
             "suggest_listing",
             "Suggest listing changes",
             "Proposes new text for one language of the listing. It doesn't change App Store Connect: the user sees the suggestion in AppDoctor's Localization screen, reviews it in place and saves it with their App Store Connect key. Give only the fields to change; a later suggestion for the same language adds to it. Limits: name and subtitle 30 characters, keywords 100, promotional text 170, description and What's New 4000. A language the listing doesn't have yet (en-GB, say) can be suggested too; the user adds it before saving. Returns the changes and anything to fix.",
@@ -71,6 +79,7 @@ pub(crate) fn call(data_dir: &Path, name: &str, args: &Args) -> Option<Result<Ve
         "get_keywords" => get_keywords(data_dir, args),
         "get_listing" => get_listing(data_dir, args),
         "suggest_listing" => suggest_listing(data_dir, args),
+        "aso_audit" => aso_audit(data_dir, args),
         _ => return None,
     })
 }
@@ -262,6 +271,37 @@ fn get_listing(data_dir: &Path, args: &Args) -> Result<Vec<Value>> {
             "Name, subtitle and keywords are what App Store search indexes. Suggest edits with suggest_listing."
         },
     })))
+}
+
+fn aso_audit(data_dir: &Path, args: &Args) -> Result<Vec<Value>> {
+    let store = store(data_dir)?;
+    let (id, app) = app(&store, args)?;
+    let live: Option<appdoctor_audit::Live> = store
+        .setting(&appdoctor_audit::live_key(id))
+        .ok()
+        .flatten()
+        .and_then(|json| serde_json::from_str(&json).ok());
+    let listings = store.listings(id).map_err(|error| error.to_string())?;
+    let keywords = store.keywords(id).map_err(|error| error.to_string())?;
+    let competitors = store.competitors(id).map_err(|error| error.to_string())?.len();
+    let countries = store.app_countries(id).unwrap_or_default();
+    let designs = appdoctor_audit::Designs::read(&data_dir.join("screenshots").join(id.to_string()));
+    let report = appdoctor_audit::audit(&appdoctor_audit::Inputs {
+        app: &app,
+        live: live.as_ref(),
+        listings: &listings,
+        keywords: &keywords,
+        competitors,
+        countries: &countries,
+        designs,
+        now: now(),
+    });
+    let mut value = serde_json::to_value(&report).map_err(|error| error.to_string())?;
+    value["note"] = json!(match &live {
+        Some(live) => format!("The live App Store page was read {}.", ago(live.fetched_at)),
+        None => "AppDoctor hasn't read the live App Store page yet: the user opens Audit in AppDoctor to include it.".to_owned(),
+    });
+    Ok(text(value))
 }
 
 fn suggest_listing(data_dir: &Path, args: &Args) -> Result<Vec<Value>> {

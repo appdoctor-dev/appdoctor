@@ -17,6 +17,7 @@ use crate::ui::localization::LocalizationView;
 use crate::ui::rankings::RankingsView;
 use crate::ui::release::ReleaseView;
 use crate::ui::screenshots::ScreenshotsView;
+use crate::ui::audit::AuditView;
 use crate::ui::settings::SettingsView;
 use crate::ui::widgets::{app_icon, flag, status_dot};
 
@@ -32,6 +33,7 @@ pub struct Shell {
     localization: Entity<LocalizationView>,
     screenshots: Entity<ScreenshotsView>,
     settings: Entity<SettingsView>,
+    audit: Entity<AuditView>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -45,6 +47,7 @@ impl Shell {
         let localization = cx.new(|cx| LocalizationView::new(state.clone(), window, cx));
         let screenshots = cx.new(|cx| ScreenshotsView::new(state.clone(), window, cx));
         let settings = cx.new(|cx| SettingsView::new(state.clone(), window, cx));
+        let audit = cx.new(|cx| AuditView::new(state.clone(), cx));
         let subscriptions = vec![
             cx.observe(&state, |_, _, cx| cx.notify()),
             cx.observe_window_appearance(window, |_, window, cx| theme::apply(Some(window), cx)),
@@ -59,6 +62,7 @@ impl Shell {
             localization,
             screenshots,
             settings,
+            audit,
             _subscriptions: subscriptions,
         }
     }
@@ -227,6 +231,7 @@ impl Shell {
                             if !matches!(
                                 state.section,
                                 Section::Rankings
+                                    | Section::Audit
                                     | Section::Competitors
                                     | Section::Localization
                                     | Section::Screenshots
@@ -315,6 +320,13 @@ impl Shell {
                             .on_click(cx.listener(|this, _, _, cx| this.go(Section::Apps, cx))),
                     )
                     .child(Self::group_label("Optimize", cx))
+                    .child(self.nav_item(
+                        "nav-audit",
+                        gpui_kit::assets::IconName::Stethoscope,
+                        "Audit",
+                        Section::Audit,
+                        cx,
+                    ))
                     .child(self.nav_item("nav-keywords", IconName::Search, "Keywords", Section::Keywords, cx))
                     .child(self.nav_item(
                         "nav-rankings",
@@ -437,6 +449,7 @@ impl Render for Shell {
         let section = self.state.read(cx).section;
         let page = match section {
             Section::Keywords => self.keywords.clone().into_any_element(),
+            Section::Audit => self.audit.clone().into_any_element(),
             Section::Apps => self.apps.clone().into_any_element(),
             Section::Release => self.release.clone().into_any_element(),
             Section::Rankings => self.rankings.clone().into_any_element(),

@@ -249,6 +249,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "appdoctor-audit"
+version = "0.1.0"
+dependencies = [
+ "appdoctor-screenshots",
+ "appdoctor-store",
+ "serde",
+]
+
+[[package]]
 name = "appdoctor-desktop"
 version = "0.1.0"
 dependencies = [
@@ -257,6 +266,7 @@ dependencies = [
  "appdoctor-apple-ads",
  "appdoctor-appstore",
  "appdoctor-asc",
+ "appdoctor-audit",
  "appdoctor-entitlement",
  "appdoctor-jwt",
  "appdoctor-mcp",
@@ -307,6 +317,7 @@ dependencies = [
 name = "appdoctor-mcp"
 version = "0.1.0"
 dependencies = [
+ "appdoctor-audit",
  "appdoctor-screenshots",
  "appdoctor-store",
  "appdoctor-video",

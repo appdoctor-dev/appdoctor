@@ -19,6 +19,7 @@ const TOOLS: &[&str] = &[
     "get_keywords",
     "get_listing",
     "suggest_listing",
+    "aso_audit",
     "get_design",
     "list_themes",
     "create_video",

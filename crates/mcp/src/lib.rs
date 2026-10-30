@@ -40,7 +40,8 @@ and add it with import_svg: each top-level element becomes a layer the user can 
 editable words. For the App Store listing (name, subtitle, keywords, description, promotional text), \
 get_keywords shows the keywords the user tracks with their ranks, popularity and difficulty per country, \
 get_listing shows the listing as last pulled from App Store Connect, and suggest_listing proposes edits the \
-user reviews and saves in AppDoctor; nothing reaches the App Store without them. \
+user reviews and saves in AppDoctor; nothing reaches the App Store without them. aso_audit scores the whole \
+product page and lists what to fix first. \
 Start with list_apps and get_design, use design_options and list_fonts for \
 allowed values, and look at your work with render_slide before you say it's done. The user sees every \
 change live in AppDoctor and can undo it.";

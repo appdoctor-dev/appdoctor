@@ -127,6 +127,33 @@ The editor checks the file every 0.7 s. It takes in changes it didn't write
 as one undoable step, and it skips its own save if the file changed
 underneath it, so an agent's edit is never overwritten.
 
+**ASO audit** (*Audit*, first under Optimize) scores the selected app out of
+100, with a score for each of five areas and what to fix first.
+- It reads the live product page from the public App Store lookup (saved, so
+  agents audit the same page), the listing Localization pulled, the tracked
+  keywords and ranks, competitors, countries and the app's designs. The
+  checks live in `crates/audit`, shared by the screen and the `aso_audit`
+  tool.
+- Listing text: name and subtitle use, words the subtitle repeats from the
+  name, the keyword field's length, spaces, repeated and filler words,
+  promotional text, the description's length, and a What's New that says
+  nothing.
+- Keywords: how many are tracked and checked, how fresh the ranks are,
+  tracked keywords the listing can't match, top 10 presence, popular
+  searches the app doesn't appear in, very hard targets, and missing
+  popularity data.
+- Screenshots and video: the live screenshot count, headlines on the first
+  three, an app preview, and the iOS 27 header and search art.
+- Ratings and updates: rating count and average, how long since the last
+  update, and a 17+ age rating.
+- Countries and languages: tracked storefronts without their language,
+  languages the app speaks but the listing doesn't, Spanish (Mexico) for
+  the US, more countries and competitors.
+- What it couldn't check doesn't score well (a listing that wasn't pulled
+  caps its area at 70). Each finding has a button to the screen that fixes
+  it, and *Fix with AI* opens the Localization chat to run the audit and
+  suggest listing changes.
+
 **Improve the listing with AI** (*AI* in the Localization header) uses the
 same chat for the App Store listing.
 - Localization loads the listing from App Store Connect on arrival and saves
@@ -197,7 +224,7 @@ uses the AI you already have, so there's no second subscription.
   - Gemini CLI uses a private settings folder that trusts only AppDoctor's
     server.
 - Ollama: AppDoctor runs the tool loop itself over Ollama's local API, with
-  a focused set of 20 tools.
+  a focused set of 21 tools.
 - Checked against real tools: Claude Code and Codex listed the apps through
   the tools, and a Claude Code follow-up remembered the first answer. Gemini
   CLI refused this machine's Google account (Google moved free individual

@@ -29,6 +29,17 @@ pub struct AppDetails {
     pub average_rating: f32,
     pub price: Option<String>,
     pub description: Option<String>,
+    /// The version's release notes (What's New).
+    pub release_notes: Option<String>,
+    /// When the current version came out, as Apple writes it (RFC 3339).
+    pub released: Option<String>,
+    /// How many iPhone and iPad screenshots the product page shows.
+    pub screenshots: u32,
+    pub ipad_screenshots: u32,
+    /// The languages the app itself supports (ISO 639-1, upper case).
+    pub languages: Vec<String>,
+    /// The age rating ("4+", "17+").
+    pub content_rating: Option<String>,
 }
 
 /// One search result, in rank order.
@@ -213,6 +224,15 @@ struct RawApp {
     average_user_rating: Option<f32>,
     formatted_price: Option<String>,
     description: Option<String>,
+    release_notes: Option<String>,
+    current_version_release_date: Option<String>,
+    #[serde(default)]
+    screenshot_urls: Vec<String>,
+    #[serde(default)]
+    ipad_screenshot_urls: Vec<String>,
+    #[serde(default, rename = "languageCodesISO2A")]
+    language_codes: Vec<String>,
+    track_content_rating: Option<String>,
 }
 
 impl RawApp {
@@ -259,6 +279,12 @@ pub(crate) fn parse_lookup(body: &str) -> Result<Vec<AppDetails>> {
             average_rating: raw.average_user_rating.unwrap_or(0.0),
             price: raw.formatted_price,
             description: raw.description,
+            release_notes: raw.release_notes,
+            released: raw.current_version_release_date,
+            screenshots: raw.screenshot_urls.len() as u32,
+            ipad_screenshots: raw.ipad_screenshot_urls.len() as u32,
+            languages: raw.language_codes,
+            content_rating: raw.track_content_rating,
         })
         .collect())
 }
