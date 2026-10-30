@@ -2,17 +2,29 @@
 
 An open-source, local-first ASO tool for macOS and Windows: App Store keyword research with Apple's own popularity score, rank tracking in every country, listing edits pushed to App Store Connect, and AI agents that can localize and submit for you. See [docs/product-spec.md](docs/product-spec.md).
 
+Website and downloads: [appdoctor.so](https://appdoctor.so)
+
 ## Repository
 
 | Path | What it is |
 | --- | --- |
+| `apps/desktop`, `crates/*` | The native app (Rust + GPUI) for macOS and Windows. See [apps/desktop/README.md](apps/desktop/README.md). |
 | `apps/api` | Hono on Cloudflare Workers. Better Auth (magic link, Google, desktop device sign-in) with the Stripe plugin for subscriptions; D1 + R2. Admin routes are served only through a private service binding. |
 | `apps/web` | Marketing site (TanStack Start): landing, pricing, download, account, docs, blog, and the agent layer (`llms.txt`, Markdown pages, sitemap, robots, RSS). |
 | `apps/admin` | Admin (TanStack Start + shadcn): revenue, subscribers, users, pricing, releases, Stripe alerts. Protected by Cloudflare Access (Zero Trust). |
 | `packages/db` | Drizzle schema and D1 migrations, shared by the API. |
-| `apps/desktop`, `crates/*` | The native app (Rust + GPUI), on its own branch while it's being built. |
 
-## Run it locally
+## Build the desktop app
+
+Requires [rustup](https://rustup.rs); it installs the Rust version pinned in `rust-toolchain.toml` on first use.
+
+```bash
+cargo run -p appdoctor-desktop --features no-license-check
+```
+
+`no-license-check` turns off the subscription check, so every feature works without an AppDoctor account. [apps/desktop/README.md](apps/desktop/README.md) covers the rest: tests, the macOS bundle, data folders and the architecture.
+
+## Run the website, API and admin locally
 
 Requires Node 24+.
 
@@ -104,3 +116,7 @@ Selling software subscriptions to people in the US and EU usually means collecti
 ## For AI agents
 
 The website serves `/llms.txt`, `/llms-full.txt` and a Markdown version of every page (append `.md`, or send `Accept: text/markdown`).
+
+## License
+
+[AGPL-3.0](LICENSE). You can read, build and change AppDoctor for free. If you run a changed version as a service for other people, you have to publish your changes under the same licence.
