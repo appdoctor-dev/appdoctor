@@ -10,6 +10,7 @@
 pub mod clients;
 mod creative;
 mod design;
+mod listing;
 mod simulator;
 
 use std::io::{BufRead, Write};
@@ -36,7 +37,11 @@ play screen recordings, render_frame shows any moment and export_video writes th
 motion, build it, run it in the iOS Simulator and record it with `xcrun simctl io booted recordVideo --codec \
 h264 <file>.mov`; read the app's own code to find what's worth showing. To add a picture, icon or illustration, draw it as SVG \
 and add it with import_svg: each top-level element becomes a layer the user can move and edit, and <text> stays \
-editable words. Start with list_apps and get_design, use design_options and list_fonts for \
+editable words. For the App Store listing (name, subtitle, keywords, description, promotional text), \
+get_keywords shows the keywords the user tracks with their ranks, popularity and difficulty per country, \
+get_listing shows the listing as last pulled from App Store Connect, and suggest_listing proposes edits the \
+user reviews and saves in AppDoctor; nothing reaches the App Store without them. \
+Start with list_apps and get_design, use design_options and list_fonts for \
 allowed values, and look at your work with render_slide before you say it's done. The user sees every \
 change live in AppDoctor and can undo it.";
 

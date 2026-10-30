@@ -2,6 +2,10 @@
 //! place and pushed to App Store Connect after a confirmation that lists
 //! exactly what changes.
 //!
+//! Each pull is saved to the database, so AI agents can read the listing
+//! (AppDoctor's `get_listing` tool). Their suggestions (`suggest_listing`)
+//! show here, per language, to review in the fields and save the usual way.
+//!
 //! Name and subtitle live on the app info; keywords, promotional text,
 //! description and what's new live on the App Store version. Each is
 //! editable only while its parent is (a version being prepared, say).
@@ -15,9 +19,13 @@ use appdoctor_asc::{
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 use gpui_kit::component::select::{SearchableVec, Select, SelectEvent, SelectItem, SelectState};
-use gpui_kit::component::{ActiveTheme as _, Disableable as _, IconName, Sizable as _, WindowExt as _, h_flex, v_flex};
+use gpui_kit::component::{
+    ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, WindowExt as _, h_flex, v_flex,
+};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+
+use appdoctor_store::{LOCALES, Listing, ListingDraft, ListingText, locale_name};
 
 use crate::runtime;
 use crate::services::Services;
@@ -33,55 +41,7 @@ const PROMO_LIMIT: usize = 170;
 const DESCRIPTION_LIMIT: usize = 4000;
 const WHATS_NEW_LIMIT: usize = 4000;
 
-/// App Store Connect's metadata locales.
-const LOCALES: &[(&str, &str)] = &[
-    ("ar-SA", "Arabic"),
-    ("ca", "Catalan"),
-    ("zh-Hans", "Chinese (Simplified)"),
-    ("zh-Hant", "Chinese (Traditional)"),
-    ("hr", "Croatian"),
-    ("cs", "Czech"),
-    ("da", "Danish"),
-    ("nl-NL", "Dutch"),
-    ("en-AU", "English (Australia)"),
-    ("en-CA", "English (Canada)"),
-    ("en-GB", "English (U.K.)"),
-    ("en-US", "English (U.S.)"),
-    ("fi", "Finnish"),
-    ("fr-FR", "French"),
-    ("fr-CA", "French (Canada)"),
-    ("de-DE", "German"),
-    ("el", "Greek"),
-    ("he", "Hebrew"),
-    ("hi", "Hindi"),
-    ("hu", "Hungarian"),
-    ("id", "Indonesian"),
-    ("it", "Italian"),
-    ("ja", "Japanese"),
-    ("ko", "Korean"),
-    ("ms", "Malay"),
-    ("no", "Norwegian"),
-    ("pl", "Polish"),
-    ("pt-BR", "Portuguese (Brazil)"),
-    ("pt-PT", "Portuguese (Portugal)"),
-    ("ro", "Romanian"),
-    ("ru", "Russian"),
-    ("sk", "Slovak"),
-    ("es-MX", "Spanish (Mexico)"),
-    ("es-ES", "Spanish (Spain)"),
-    ("sv", "Swedish"),
-    ("th", "Thai"),
-    ("tr", "Turkish"),
-    ("uk", "Ukrainian"),
-    ("vi", "Vietnamese"),
-];
 
-fn locale_name(code: &str) -> String {
-    LOCALES
-        .iter()
-        .find(|(c, _)| c.eq_ignore_ascii_case(code))
-        .map_or_else(|| code.to_owned(), |(_, name)| (*name).to_owned())
-}
 
 #[derive(Clone)]
 struct LocaleItem {
@@ -137,6 +97,14 @@ struct Changes {
 pub struct LocalizationView {
     state: Entity<AppState>,
     loaded: Option<Loaded>,
+    /// The app last loaded automatically, so it happens once.
+    auto_loaded: Option<u64>,
+    /// AI suggestions waiting, by language.
+    drafts: Vec<ListingDraft>,
+    /// The suggestion now in the fields, cleared once saved.
+    reviewing: Option<String>,
+    ai: Entity<crate::ui::screenshots::AiPanel>,
+    ai_open: bool,
     loading: bool,
     saving: bool,
     selected: Option<String>,
@@ -178,6 +146,9 @@ impl LocalizationView {
                     this.loaded = None;
                     this.selected = None;
                     this.status = None;
+                    this.reviewing = None;
+                    this.drafts.clear();
+                    this.check_drafts(cx);
                 }
                 cx.notify();
             }),
@@ -202,9 +173,30 @@ impl LocalizationView {
             }));
         }
 
+        let ai = {
+            let state = state.clone();
+            cx.new(|cx| crate::ui::screenshots::AiPanel::listing(state, window, cx))
+        };
+        // Suggestions arrive from an agent's process; look for them often.
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(std::time::Duration::from_millis(1200)).await;
+                let alive = this.update(cx, |this, cx| this.check_drafts(cx));
+                if alive.is_err() {
+                    return;
+                }
+            }
+        })
+        .detach();
+
         Self {
             state,
             loaded: None,
+            auto_loaded: None,
+            drafts: Vec::new(),
+            reviewing: None,
+            ai,
+            ai_open: false,
             loading: false,
             saving: false,
             selected: None,
@@ -217,6 +209,190 @@ impl LocalizationView {
 
     fn services(&self, cx: &App) -> Arc<Services> {
         self.state.read(cx).services.clone()
+    }
+
+    /// Picks up suggestions an agent made (or withdrew) since last time.
+    fn check_drafts(&mut self, cx: &mut Context<Self>) {
+        let Some(app_id) = self.state.read(cx).selected_app else {
+            return;
+        };
+        let drafts = self.services(cx).store.drafts(app_id).unwrap_or_default();
+        if drafts != self.drafts {
+            self.drafts = drafts;
+            cx.notify();
+        }
+    }
+
+    fn draft(&self, code: &str) -> Option<&ListingDraft> {
+        self.drafts.iter().find(|d| d.locale == code)
+    }
+
+    /// Saves what was pulled, for agents to read.
+    fn remember(&self, loaded: &Loaded, cx: &App) {
+        let pulled_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs() as i64);
+        let listings: Vec<Listing> = loaded
+            .locales
+            .iter()
+            .map(|locale| Listing {
+                locale: locale.code.clone(),
+                text: ListingText {
+                    name: locale.info.as_ref().and_then(|i| i.name.clone()),
+                    subtitle: locale.info.as_ref().and_then(|i| i.subtitle.clone()),
+                    keywords: locale.version.as_ref().and_then(|v| v.keywords.clone()),
+                    promotional_text: locale.version.as_ref().and_then(|v| v.promotional_text.clone()),
+                    description: locale.version.as_ref().and_then(|v| v.description.clone()),
+                    whats_new: locale.version.as_ref().and_then(|v| v.whats_new.clone()),
+                },
+                version: loaded.version_label.clone(),
+                info_editable: loaded.info_editable,
+                version_editable: loaded.version_editable,
+                pulled_at,
+            })
+            .collect();
+        if let Err(error) = self.services(cx).store.replace_listings(loaded.app_id, &listings) {
+            tracing::error!(%error, "saving the pulled listing");
+        }
+    }
+
+    /// Puts a suggestion's fields in the editor, to look over and save.
+    fn review(&mut self, code: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(draft) = self.draft(code).cloned() else {
+            return;
+        };
+        if self.selected.as_deref() != Some(code) {
+            self.select(code, window, cx);
+        }
+        let t = draft.text;
+        let set = |state: &Entity<InputState>, value: Option<String>, window: &mut Window, cx: &mut Context<Self>| {
+            if let Some(value) = value {
+                state.update(cx, |input, cx| input.set_value(value, window, cx));
+            }
+        };
+        set(&self.fields.name, t.name, window, cx);
+        set(&self.fields.subtitle, t.subtitle, window, cx);
+        set(&self.fields.keywords, t.keywords, window, cx);
+        set(&self.fields.promo, t.promotional_text, window, cx);
+        if let Some(value) = t.description {
+            self.fields.description.update(cx, |area, cx| area.set_value(value, window, cx));
+        }
+        if let Some(value) = t.whats_new {
+            self.fields.whats_new.update(cx, |area, cx| area.set_value(value, window, cx));
+        }
+        self.reviewing = Some(code.to_owned());
+        self.status = Some(Ok("Suggestion in the fields: edit anything, then Review and Save.".into()));
+        cx.notify();
+    }
+
+    fn dismiss_draft(&mut self, code: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(app_id) = self.state.read(cx).selected_app {
+            let _ = self.services(cx).store.delete_draft(app_id, code);
+        }
+        self.drafts.retain(|d| d.locale != code);
+        if self.reviewing.as_deref() == Some(code) {
+            self.reviewing = None;
+            // Back to what App Store Connect has.
+            self.select(code, window, cx);
+        }
+        cx.notify();
+    }
+
+    /// The suggestion for the shown language, or for a language the
+    /// listing doesn't have yet.
+    fn suggestion_banner(&self, cx: &mut Context<Self>) -> Option<Div> {
+        let theme = cx.theme().clone();
+        let loaded = self.loaded.as_ref()?;
+        let selected = self.selected.clone();
+        let (draft, missing) = match selected.as_deref().and_then(|code| self.draft(code)) {
+            Some(draft) => (draft.clone(), false),
+            None => (
+                self.drafts
+                    .iter()
+                    .find(|d| !loaded.locales.iter().any(|l| l.code == d.locale))?
+                    .clone(),
+                true,
+            ),
+        };
+        let code = draft.locale.clone();
+        let changed: Vec<&str> = draft.text.fields().iter().filter(|f| f.3.is_some()).map(|f| f.1).collect();
+        let reviewing = self.reviewing.as_deref() == Some(code.as_str());
+        let title = if missing {
+            format!("Your AI wrote a {} listing", locale_name(&code))
+        } else if reviewing {
+            "Your AI's suggestion is in the fields".to_owned()
+        } else {
+            format!("Your AI suggests a new {}", changed.join(", ").to_lowercase())
+        };
+        let (review_code, dismiss_code, add_code) = (code.clone(), code.clone(), code.clone());
+        Some(
+            h_flex()
+                .gap(px(10.))
+                .items_start()
+                .px(px(14.))
+                .py(px(11.))
+                .rounded(px(10.))
+                .bg(theme.primary.opacity(0.09))
+                .border_1()
+                .border_color(theme.primary.opacity(0.25))
+                .child(
+                    Icon::new(gpui_kit::assets::IconName::Sparkles)
+                        .size(px(15.))
+                        .mt(px(1.))
+                        .text_color(theme.primary),
+                )
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .gap(px(3.))
+                        .child(div().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).child(title))
+                        .when(!draft.note.is_empty(), |this| {
+                            this.child(div().text_size(px(12.)).text_color(theme.muted_foreground).child(draft.note.clone()))
+                        })
+                        .when(missing, |this| {
+                            this.child(div().text_size(px(12.)).text_color(theme.muted_foreground).child(format!(
+                                "Add {} to App Store Connect first, then review it here.",
+                                locale_name(&code)
+                            )))
+                        }),
+                )
+                .child(
+                    h_flex()
+                        .gap(px(6.))
+                        .flex_shrink_0()
+                        .child(
+                            Button::new("draft-dismiss")
+                                .ghost()
+                                .small()
+                                .label("Dismiss")
+                                .on_click(cx.listener(move |this, _, window, cx| this.dismiss_draft(&dismiss_code, window, cx))),
+                        )
+                        .when(missing, |this| {
+                            this.child(
+                                Button::new("draft-add-language")
+                                    .primary()
+                                    .small()
+                                    .label(format!("Add {}", locale_name(&add_code)))
+                                    .loading(self.loading)
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        if let Some((code, _)) = LOCALES.iter().find(|(c, _)| *c == add_code) {
+                                            this.add_locale(code, window, cx);
+                                        }
+                                    })),
+                            )
+                        })
+                        .when(!missing && !reviewing, |this| {
+                            this.child(
+                                Button::new("draft-review")
+                                    .primary()
+                                    .small()
+                                    .label("Review")
+                                    .on_click(cx.listener(move |this, _, window, cx| this.review(&review_code, window, cx))),
+                            )
+                        }),
+                ),
+        )
     }
 
     fn load(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -288,6 +464,7 @@ impl LocalizationView {
                 this.loading = false;
                 match result {
                     Ok(loaded) => {
+                        this.remember(&loaded, cx);
                         let keep = this
                             .selected
                             .clone()
@@ -316,6 +493,7 @@ impl LocalizationView {
             return;
         };
         self.selected = Some(code.to_owned());
+        self.reviewing = None;
         let info = locale.info.unwrap_or(AppInfoLocalization {
             id: String::new(),
             locale: code.to_owned(),
@@ -490,6 +668,12 @@ impl LocalizationView {
             let result = save.await;
             this.update(cx, |this, cx| {
                 this.saving = false;
+                if result.is_ok()
+                    && let (Some(code), Some(app_id)) = (this.reviewing.take(), this.state.read(cx).selected_app)
+                {
+                    let _ = this.services(cx).store.delete_draft(app_id, &code);
+                    this.drafts.retain(|d| d.locale != code);
+                }
                 this.status = Some(match result {
                     Ok(count) => Ok(format!(
                         "Saved {count} field{} to App Store Connect.",
@@ -525,6 +709,9 @@ impl LocalizationView {
             }
             loaded
         });
+        if let Some(loaded) = &self.loaded {
+            self.remember(loaded, cx);
+        }
         cx.notify();
     }
 
@@ -787,7 +974,7 @@ fn preview(text: &str) -> String {
 }
 
 impl Render for LocalizationView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let services = self.services(cx);
         let Some(app) = self.state.read(cx).selected().cloned() else {
             return widgets::empty_state(IconName::Inbox, "No app selected", "Pick an app in the sidebar.", cx)
@@ -805,7 +992,30 @@ impl Render for LocalizationView {
             })))
             .into_any_element();
         }
+        // Reading the listing changes nothing, so it loads on arrival.
+        if self.loaded.is_none() && !self.loading && self.auto_loaded != Some(app.id) {
+            self.auto_loaded = Some(app.id);
+            self.load(window, cx);
+        }
         let theme = cx.theme().clone();
+        let ai_open = self.ai_open;
+        let ai_button = Button::new("localization-ai")
+            .small()
+            .icon(gpui_kit::assets::IconName::Sparkles)
+            .label("AI")
+            .tooltip("Improve the listing with your AI")
+            .map(|button| if ai_open { button.primary() } else { button.ghost() })
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.ai_open = !this.ai_open;
+                cx.notify();
+            }));
+        let with_ai = move |body: AnyElement, ai: Entity<crate::ui::screenshots::AiPanel>| {
+            h_flex()
+                .flex_1()
+                .min_h_0()
+                .child(div().flex_1().min_w_0().h_full().child(body))
+                .when(ai_open, |this| this.child(ai))
+        };
 
         let header = h_flex()
             .h(px(60.))
@@ -863,18 +1073,20 @@ impl Render for LocalizationView {
                     .loading(self.loading)
                     .disabled(self.loading)
                     .on_click(cx.listener(|this, _, window, cx| this.load(window, cx))),
-            );
+            )
+            .child(ai_button);
 
         let Some(loaded) = self.loaded.clone() else {
+            let empty = widgets::empty_state(
+                gpui_kit::assets::IconName::Languages,
+                if self.loading { "Loading your metadata…" } else { "Load your metadata" },
+                "AppDoctor reads every language's name, subtitle, keywords and description from App Store Connect. Nothing changes until you save and confirm.",
+                cx,
+            );
             return v_flex()
                 .size_full()
                 .child(header)
-                .child(widgets::empty_state(
-                    gpui_kit::assets::IconName::Languages,
-                    "Load your metadata",
-                    "AppDoctor reads every language's name, subtitle, keywords and description from App Store Connect. Nothing changes until you save and confirm.",
-                    cx,
-                ))
+                .child(with_ai(empty.into_any_element(), self.ai.clone()))
                 .into_any_element();
         };
 
@@ -886,6 +1098,7 @@ impl Render for LocalizationView {
             } else {
                 (theme.foreground, theme.muted_foreground)
             };
+            let suggested = self.draft(&code).is_some();
             v_flex()
                 .id(SharedString::from(format!("locale-{code}")))
                 .px(px(8.))
@@ -899,7 +1112,19 @@ impl Render for LocalizationView {
                         this.hover(|style| style.bg(theme.foreground.opacity(0.05)))
                     }
                 })
-                .child(div().text_size(px(13.)).text_color(text).child(locale_name(&code)))
+                .child(
+                    h_flex()
+                        .gap(px(5.))
+                        .items_center()
+                        .child(div().text_size(px(13.)).text_color(text).child(locale_name(&code)))
+                        .when(suggested, |this| {
+                            this.child(
+                                Icon::new(gpui_kit::assets::IconName::Sparkles)
+                                    .size(px(11.))
+                                    .text_color(if active { text } else { theme.primary }),
+                            )
+                        }),
+                )
                 .child(
                     div().text_size(px(11.)).text_color(subtext).truncate().child(
                         locale
@@ -1092,6 +1317,7 @@ impl Render for LocalizationView {
                     .pt(px(22.))
                     .pb(px(40.))
                     .gap(px(24.))
+                    .children(self.suggestion_banner(cx))
                     .child(app_info)
                     .child(search)
                     .child(version)
@@ -1108,10 +1334,11 @@ impl Render for LocalizationView {
             ),
         );
 
+        let body = h_flex().size_full().child(locale_list).child(editor);
         v_flex()
             .size_full()
             .child(header)
-            .child(h_flex().flex_1().min_h_0().child(locale_list).child(editor))
+            .child(with_ai(body.into_any_element(), self.ai.clone()))
             .into_any_element()
     }
 }

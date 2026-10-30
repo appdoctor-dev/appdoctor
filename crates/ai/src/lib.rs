@@ -353,6 +353,33 @@ pub fn context(app: &str, app_id: u64, device: &str, design_folder: &Path, proje
     )
 }
 
+/// The working rules for improving an app's App Store listing.
+pub fn listing_context(app: &str, app_id: u64, countries: &[String], project: Option<&Path>) -> String {
+    let project = match project {
+        Some(project) => format!(
+            "The app's source code is in {} (your working folder): read it to learn what the app really does, \
+             so the listing is true to it. You can read files there but not run commands.",
+            project.display()
+        ),
+        None => String::new(),
+    };
+    let countries = if countries.is_empty() { "us".to_owned() } else { countries.join(", ") };
+    format!(
+        "You are working inside AppDoctor, a Mac app for App Store optimization, on the App Store listing of \
+         \"{app}\" (app_id {app_id}), which the user tracks in these storefronts: {countries}. {project} Start with \
+         get_keywords (the tracked keywords with ranks, Apple popularity and difficulty per country) and get_listing \
+         (the listing as pulled from App Store Connect, with which tracked keywords it covers and misses). Then \
+         suggest changes with suggest_listing, one language at a time, with a short note on why. Suggestions don't \
+         change the App Store: the user reviews them in AppDoctor and saves them with their own App Store Connect \
+         key. Good listings put the most valuable keywords (popular, rankable) in the name and subtitle, fill the \
+         100-character keyword field with other words separated by commas without spaces, never repeat a word \
+         already in the name, subtitle or keyword field, stay within the limits and read naturally. Each storefront \
+         uses the listing in its own language (English (U.K.) in the UK) when there is one, so a storefront without \
+         one is an opportunity. The user chats with you in a small panel: keep messages short and plain, without \
+         tables or code. Finish with two or three sentences on what you suggested and why."
+    )
+}
+
 /// The first `limit` characters of a tool's answer, on one line.
 fn shorten(text: &str, limit: usize) -> String {
     let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");

@@ -177,6 +177,14 @@ fn describe(name: &str, input: &Value) -> (Glyph, String, String) {
         }
         "shell" | "Bash" | "run_shell_command" => pair(Glyph::Command, "Running", "Ran", "a command".into()),
         "list_apps" => pair(Glyph::Apps, "Checking", "Checked", "your apps".into()),
+        "get_keywords" => pair(Glyph::Search, "Checking", "Checked", "your keywords and ranks".into()),
+        "get_listing" => pair(Glyph::Read, "Reading", "Read", "your listing".into()),
+        "suggest_listing" => pair(
+            Glyph::Draw,
+            "Suggesting",
+            "Suggested",
+            format!("changes for {}", appdoctor_store::locale_name(&text("locale"))),
+        ),
         "get_design" => pair(Glyph::Design, "Reading", "Read", "the design".into()),
         "design_options" | "list_fonts" | "list_themes" => {
             pair(Glyph::Design, "Looking at", "Looked at", "the options".into())
@@ -410,9 +418,21 @@ fn tilde(path: &Path) -> String {
     }
 }
 
-pub(super) struct AiPanel {
+/// What the panel helps with, which sets its suggestions and the AI's
+/// instructions.
+#[derive(Clone, Copy, PartialEq)]
+enum Mode {
+    /// Screenshots, videos and drawings, beside the screenshot editor.
+    Design,
+    /// The App Store listing, beside Localization.
+    Listing,
+}
+
+pub(crate) struct AiPanel {
     state: Entity<AppState>,
-    view: WeakEntity<ScreenshotsView>,
+    mode: Mode,
+    /// The screenshot editor, for the "Use AppDoctor from…" dialog.
+    view: Option<WeakEntity<ScreenshotsView>>,
     found: Vec<Found>,
     detecting: bool,
     provider: Option<Provider>,
@@ -442,16 +462,33 @@ pub(super) struct AiPanel {
 }
 
 impl AiPanel {
-    pub(super) fn new(
+    /// For the screenshot editor.
+    pub(super) fn design(
         state: Entity<AppState>,
         view: WeakEntity<ScreenshotsView>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AiPanel {
+        Self::new(state, Mode::Design, Some(view), window, cx)
+    }
+
+    /// For Localization: improving the listing with the tracked keywords.
+    pub(crate) fn listing(state: Entity<AppState>, window: &mut Window, cx: &mut Context<Self>) -> AiPanel {
+        Self::new(state, Mode::Listing, None, window, cx)
+    }
+
+    fn new(
+        state: Entity<AppState>,
+        mode: Mode,
+        view: Option<WeakEntity<ScreenshotsView>>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AiPanel {
         let prompt = cx.new(|cx| {
-            let mut prompt = TextareaState::new(window, cx)
-                .auto_grow(1, 8)
-                .placeholder("Ask for screenshots, a video, a drawing…");
+            let mut prompt = TextareaState::new(window, cx).auto_grow(1, 8).placeholder(match mode {
+                Mode::Design => "Ask for screenshots, a video, a drawing…",
+                Mode::Listing => "Ask about your listing, keywords, another country…",
+            });
             prompt.set_submit_on_enter(true, cx);
             prompt
         });
@@ -462,6 +499,7 @@ impl AiPanel {
         })];
         let mut panel = AiPanel {
             state,
+            mode,
             view,
             found: Vec::new(),
             detecting: false,
@@ -733,7 +771,15 @@ impl AiPanel {
             model: self.model.clone(),
             effort: self.effort.clone(),
             prompt: prompt.clone(),
-            context: appdoctor_ai::context(&app_name, app_id, target.slug(), &folder, project.as_deref()),
+            context: match self.mode {
+                Mode::Design => appdoctor_ai::context(&app_name, app_id, target.slug(), &folder, project.as_deref()),
+                Mode::Listing => appdoctor_ai::listing_context(
+                    &app_name,
+                    app_id,
+                    &self.state.read(cx).countries(app_id),
+                    project.as_deref(),
+                ),
+            },
             launch: super::agent::launch(),
             data_dir,
             project,
@@ -895,6 +941,13 @@ impl AiPanel {
     }
 
     fn suggestions(&self, cx: &App) -> &'static [&'static str] {
+        if self.mode == Mode::Listing {
+            return &[
+                "Improve my listing for the keywords I track",
+                "Which tracked keywords is my listing missing, and what would you change?",
+                "Write listings for the other countries I track",
+            ];
+        }
         match self.state.read(cx).screenshot_target {
             Target::Iphone | Target::Ipad => &[
                 "Make a 20-second app preview of the app's best features",
@@ -1354,10 +1407,17 @@ impl AiPanel {
         v_flex()
             .gap(px(8.))
             .pt(px(4.))
-            .child(div().text_size(px(12.5)).text_color(theme.muted_foreground).pb(px(6.)).child(
-                "Your own AI designs here with AppDoctor's tools. You'll see each change on the canvas as it's \
-                 made, and ⌘Z undoes it.",
-            ))
+            .child(div().text_size(px(12.5)).text_color(theme.muted_foreground).pb(px(6.)).child(match self.mode {
+                Mode::Design => {
+                    "Your own AI designs here with AppDoctor's tools. You'll see each change on the canvas as it's \
+                     made, and ⌘Z undoes it."
+                }
+                Mode::Listing => {
+                    "Your own AI reads the keywords you track, their ranks in each country and your listing, then \
+                     suggests changes. They wait here for you to review and save; nothing reaches the App Store \
+                     without you."
+                }
+            }))
             .when_some(
                 self.suggested_project(cx).filter(|_| self.project(cx).is_none()),
                 |this, folder| {
@@ -1460,20 +1520,22 @@ impl AiPanel {
                             .child(action),
                     ),
             )
-            .child(
-                div()
-                    .id("ai-elsewhere")
-                    .text_size(px(11.))
-                    .text_color(theme.muted_foreground)
-                    .cursor_pointer()
-                    .hover(|style| style.text_color(theme.primary))
-                    .child("Use AppDoctor from Claude Desktop, Cursor or another app…")
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.view
-                            .update(cx, |view, cx| view.open_agent_dialog(window, cx))
-                            .ok();
-                    })),
-            )
+            .when(self.view.is_some(), |this| {
+                this.child(
+                    div()
+                        .id("ai-elsewhere")
+                        .text_size(px(11.))
+                        .text_color(theme.muted_foreground)
+                        .cursor_pointer()
+                        .hover(|style| style.text_color(theme.primary))
+                        .child("Use AppDoctor from Claude Desktop, Cursor or another app…")
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            if let Some(view) = &this.view {
+                                view.update(cx, |view, cx| view.open_agent_dialog(window, cx)).ok();
+                            }
+                        })),
+                )
+            })
     }
 }
 

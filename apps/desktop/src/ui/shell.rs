@@ -182,6 +182,7 @@ impl Shell {
                     .clone()
                     .and_then(|url| icons.update(cx, |icons, cx| icons.get(&url, cx)));
                 let count = self.state.read(cx).keyword_count(id);
+                let countries = self.state.read(cx).countries(id);
                 h_flex()
                     .id(("sidebar-app", id))
                     .px_2()
@@ -214,7 +215,10 @@ impl Shell {
                                 div()
                                     .text_xs()
                                     .text_color(theme.muted_foreground)
-                                    .child(format!("{} iPhone · {count} keywords", flag(&app.country))),
+                                    .child(format!(
+                                        "{} iPhone · {count} keywords",
+                                        countries.iter().map(|c| flag(c)).collect::<Vec<_>>().join(" ")
+                                    )),
                             ),
                     )
                     .on_click(cx.listener(move |this, _, _, cx| {

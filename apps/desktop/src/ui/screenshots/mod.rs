@@ -13,6 +13,8 @@
 
 mod agent;
 mod ai;
+
+pub(crate) use ai::AiPanel;
 mod clips;
 mod inspector;
 mod view;
@@ -235,7 +237,7 @@ impl ScreenshotsView {
         let (clip_frames, clips_task) = ClipFrames::new(cx);
         let ai = {
             let (state, view) = (state.clone(), cx.entity().downgrade());
-            cx.new(|cx| ai::AiPanel::new(state, view, window, cx))
+            cx.new(|cx| ai::AiPanel::design(state, view, window, cx))
         };
 
         let fonts = cx.new(|cx| FontSelect::new(SearchableVec::new(Vec::new()), None, window, cx).searchable(true));

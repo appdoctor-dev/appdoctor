@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use appdoctor_screenshots::{Design, DeviceModel, Frame, LayerKind, Target};
-use appdoctor_store::{AppRecord, Store};
+use appdoctor_store::{AppRecord, Listing, ListingText, Popularity, Snapshot, Store};
 use serde_json::{Value, json};
 
 use super::Server;
@@ -374,4 +374,87 @@ fn storyboards_themes_cameras_callouts_and_reviews() {
     for expected in ["create_video", "render_storyboard", "review_video", "record_simulator", "simulator_open_url"] {
         assert!(names.contains(&expected), "{expected}");
     }
+}
+
+#[test]
+fn reads_keywords_and_listing_and_suggests_edits() {
+    let dir = data_dir("listing");
+    let store = Store::open(&dir.join("appdoctor.db")).unwrap();
+    let sleep = store.add_keyword(APP, "sleep sounds", "us", 10).unwrap();
+    store.add_keyword(APP, "light meditation", "us", 10).unwrap();
+    store.add_keyword(APP, "meditation", "gb", 10).unwrap();
+    store
+        .record_snapshot(&Snapshot {
+            keyword_id: sleep,
+            checked_at: 20,
+            rank: Some(14),
+            results_count: 200,
+            difficulty: Some(61.4),
+            source: "itunes-search".into(),
+            top_apps: Vec::new(),
+            ranked_ids: Vec::new(),
+        })
+        .unwrap();
+    store
+        .set_popularity(&Popularity {
+            term: "sleep sounds".into(),
+            country: "us".into(),
+            popularity: 48,
+            source: "apple-ads".into(),
+            fetched_at: 20,
+        })
+        .unwrap();
+    store
+        .replace_listings(
+            APP,
+            &[Listing {
+                locale: "en-US".into(),
+                text: ListingText {
+                    name: Some("Strobia".into()),
+                    subtitle: Some("Light meditation".into()),
+                    keywords: Some("light,calm,relax".into()),
+                    ..Default::default()
+                },
+                version: "1.2 (PREPARE_FOR_SUBMISSION)".into(),
+                info_editable: true,
+                version_editable: true,
+                pulled_at: 30,
+            }],
+        )
+        .unwrap();
+    let server = Server::new(dir.clone());
+
+    let keywords = call_json(&server, "get_keywords", json!({ "app_id": APP }));
+    assert_eq!(keywords["countries"], json!(["us", "gb"]));
+    let first = &keywords["keywords"][1];
+    assert_eq!(first["keyword"], "sleep sounds");
+    assert_eq!(first["rank"], 14);
+    assert_eq!(first["popularity"], 48);
+    assert_eq!(first["difficulty"], 61.0);
+
+    let listing = call_json(&server, "get_listing", json!({ "app_id": APP }));
+    let english = &listing["languages"][0];
+    assert_eq!(english["fields"]["subtitle"]["length"], 16);
+    assert_eq!(english["tracked_keywords_covered"], json!(["light meditation"]));
+    assert_eq!(english["tracked_keywords_missing"], json!(["sleep sounds"]));
+    assert_eq!(english["keyword_field_repeats"], json!(["light"]));
+    assert_eq!(listing["tracked_countries_without_their_language"][0]["locale"], "en-GB");
+
+    let suggested = call_json(
+        &server,
+        "suggest_listing",
+        json!({ "app_id": APP, "locale": "en-US", "keywords": "sleep, sounds, calm", "subtitle": "Light meditation", "note": "Targets sleep sounds." }),
+    );
+    assert_eq!(suggested["changes"].as_array().unwrap().len(), 1, "an unchanged subtitle isn't a change");
+    assert_eq!(suggested["changes"][0]["after"], "sleep,sounds,calm");
+    let draft = &store.drafts(APP).unwrap()[0];
+    assert_eq!(draft.text.keywords.as_deref(), Some("sleep,sounds,calm"));
+    assert_eq!(draft.text.subtitle, None);
+
+    let uk = call_json(&server, "suggest_listing", json!({ "app_id": APP, "locale": "en-GB", "subtitle": "Calm colour meditation", "note": "For the UK." }));
+    assert!(uk["notes"][0].as_str().unwrap().contains("adds the language"));
+    let (content, failed) = call(&server, "suggest_listing", json!({ "app_id": APP, "locale": "en-US", "name": "x".repeat(31), "note": "" }));
+    assert!(failed && content[0]["text"].as_str().unwrap().contains("limit is 30"));
+    let (content, failed) = call(&server, "suggest_listing", json!({ "app_id": APP, "locale": "english", "name": "x", "note": "" }));
+    assert!(failed && content[0]["text"].as_str().unwrap().contains("isn't an App Store Connect language"));
 }

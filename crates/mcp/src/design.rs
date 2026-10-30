@@ -83,6 +83,7 @@ pub fn tools() -> Vec<Value> {
     let mut tools = design_tools();
     tools.extend(crate::creative::tools());
     tools.extend(crate::simulator::tools());
+    tools.extend(crate::listing::tools());
     tools
 }
 
@@ -367,6 +368,9 @@ pub fn call(data_dir: &Path, name: &str, args: &Value) -> Result<Vec<Value>> {
     if let Some(result) = crate::simulator::call(data_dir, name, &args) {
         return result;
     }
+    if let Some(result) = crate::listing::call(data_dir, name, &args) {
+        return result;
+    }
     match name {
         "list_apps" => list_apps(data_dir),
         "design_options" => Ok(text(design_options())),
@@ -476,7 +480,7 @@ impl Args<'_> {
     }
 }
 
-fn store(data_dir: &Path) -> Result<Store> {
+pub(crate) fn store(data_dir: &Path) -> Result<Store> {
     Store::open(&data_dir.join("appdoctor.db")).map_err(|error| format!("Couldn't open AppDoctor's database: {error}"))
 }
 
@@ -485,7 +489,8 @@ fn screenshots_folder(data_dir: &Path, app_id: u64) -> PathBuf {
 }
 
 fn list_apps(data_dir: &Path) -> Result<Vec<Value>> {
-    let apps = store(data_dir)?.apps().map_err(|error| error.to_string())?;
+    let store = store(data_dir)?;
+    let apps = store.apps().map_err(|error| error.to_string())?;
     let apps: Vec<Value> = apps
         .iter()
         .map(|app| {
@@ -495,6 +500,8 @@ fn list_apps(data_dir: &Path) -> Result<Vec<Value>> {
                 "app_id": app.id,
                 "name": app.name,
                 "developer": app.developer,
+                "countries": store.app_countries(app.id).unwrap_or_default(),
+                "keywords": store.keywords(app.id).map(|k| k.len()).unwrap_or(0),
                 "iphone_slides": count(Target::Iphone),
                 "ipad_slides": count(Target::Ipad),
             })

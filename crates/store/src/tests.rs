@@ -231,3 +231,56 @@ fn full_rankings_give_any_apps_rank() {
     assert!(history[0].ranked_ids.is_empty(), "history skips the heavy lists");
     assert_eq!(store.rank_history(id, 1).unwrap()[0].ranked_ids, vec![9, 1, 7, 8]);
 }
+
+#[test]
+fn tracks_an_app_in_more_storefronts() {
+    let store = Store::open_in_memory().unwrap();
+    store.upsert_app(&app(1)).unwrap();
+    // Adding it again from the UK keeps the US as where it came from.
+    store.upsert_app(&AppRecord { country: "gb".into(), updated_at: 200, ..app(1) }).unwrap();
+    assert_eq!(store.app(1).unwrap().unwrap().country, "us");
+    store.add_keyword(1, "sleep", "fr", 300).unwrap();
+    assert_eq!(store.app_countries(1).unwrap(), ["us", "gb", "fr"]);
+    store.remove_app_country(1, "fr").unwrap();
+    store.remove_app_country(1, "us").unwrap();
+    assert_eq!(store.app_countries(1).unwrap(), ["us", "gb"]);
+    assert!(store.keywords(1).unwrap().is_empty());
+}
+
+#[test]
+fn keeps_the_pulled_listing_and_suggested_edits() {
+    let store = Store::open_in_memory().unwrap();
+    store.upsert_app(&app(1)).unwrap();
+    let listing = Listing {
+        locale: "en-US".into(),
+        text: ListingText {
+            name: Some("Strobia".into()),
+            keywords: Some("sleep,calm".into()),
+            ..Default::default()
+        },
+        version: "1.2 (PREPARE_FOR_SUBMISSION)".into(),
+        info_editable: false,
+        version_editable: true,
+        pulled_at: 100,
+    };
+    store.replace_listings(1, std::slice::from_ref(&listing)).unwrap();
+    assert_eq!(store.listings(1).unwrap(), [listing]);
+
+    let draft = |text: ListingText, note: &str| ListingDraft {
+        locale: "en-GB".into(),
+        text,
+        note: note.into(),
+        created_at: 200,
+    };
+    store
+        .suggest_listing(1, &draft(ListingText { subtitle: Some("Light meditation".into()), ..Default::default() }, "a"))
+        .unwrap();
+    let merged = store
+        .suggest_listing(1, &draft(ListingText { keywords: Some("sleep,relax".into()), ..Default::default() }, "b"))
+        .unwrap();
+    assert_eq!(merged.text.subtitle.as_deref(), Some("Light meditation"));
+    assert_eq!(merged.text.keywords.as_deref(), Some("sleep,relax"));
+    assert_eq!(store.drafts(1).unwrap(), [merged]);
+    store.delete_draft(1, "en-GB").unwrap();
+    assert!(store.drafts(1).unwrap().is_empty());
+}

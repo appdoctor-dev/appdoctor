@@ -64,6 +64,49 @@ const MIGRATIONS: &[&str] = &[
     // 2: the full result order per check (comma-separated app IDs), so any
     // app's rank (a competitor's) can be read from checks already made.
     "ALTER TABLE rank_snapshots ADD COLUMN ranked_ids TEXT NOT NULL DEFAULT '';",
+    // 3: every storefront an app is tracked in (not just the one it was
+    // added from), its App Store Connect listing as last pulled, and listing
+    // edits an AI suggested for the user to review.
+    "CREATE TABLE app_countries (
+        app_id    INTEGER NOT NULL REFERENCES apps (id) ON DELETE CASCADE,
+        country   TEXT NOT NULL,
+        added_at  INTEGER NOT NULL,
+        PRIMARY KEY (app_id, country)
+    );
+    INSERT OR IGNORE INTO app_countries (app_id, country, added_at) SELECT id, country, added_at FROM apps;
+    INSERT OR IGNORE INTO app_countries (app_id, country, added_at)
+        SELECT app_id, country, MIN(created_at) FROM keywords GROUP BY app_id, country;
+
+    CREATE TABLE listings (
+        app_id            INTEGER NOT NULL REFERENCES apps (id) ON DELETE CASCADE,
+        locale            TEXT NOT NULL,
+        name              TEXT,
+        subtitle          TEXT,
+        keywords          TEXT,
+        promotional_text  TEXT,
+        description       TEXT,
+        whats_new         TEXT,
+        -- The App Store version the text belongs to, as \"1.2 (PREPARE_FOR_SUBMISSION)\".
+        version           TEXT NOT NULL DEFAULT '',
+        info_editable     INTEGER NOT NULL DEFAULT 0,
+        version_editable  INTEGER NOT NULL DEFAULT 0,
+        pulled_at         INTEGER NOT NULL,
+        PRIMARY KEY (app_id, locale)
+    );
+
+    CREATE TABLE listing_drafts (
+        app_id            INTEGER NOT NULL REFERENCES apps (id) ON DELETE CASCADE,
+        locale            TEXT NOT NULL,
+        name              TEXT,
+        subtitle          TEXT,
+        keywords          TEXT,
+        promotional_text  TEXT,
+        description       TEXT,
+        whats_new         TEXT,
+        note              TEXT NOT NULL DEFAULT '',
+        created_at        INTEGER NOT NULL,
+        PRIMARY KEY (app_id, locale)
+    );",
 ];
 
 pub(crate) fn run(conn: &mut Connection) -> rusqlite::Result<()> {

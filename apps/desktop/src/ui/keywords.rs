@@ -164,6 +164,7 @@ impl KeywordsView {
             .filter_map(|row| row.latest.map(|c| c.checked_at))
             .max();
         let country = state.country.clone();
+        let tracked = state.selected_app.map(|id| state.countries(id)).unwrap_or_default();
         let icons = state.icons.clone();
         let icon = app
             .as_ref()
@@ -201,6 +202,29 @@ impl KeywordsView {
                     })),
             )
             .child(div().flex_1())
+            .when(tracked.len() > 1, |this| {
+                // The storefronts it's tracked in, one click apart.
+                let theme = cx.theme().clone();
+                this.child(h_flex().gap(px(2.)).p(px(2.)).rounded(px(8.)).bg(theme.foreground.opacity(0.05)).children(
+                    tracked.iter().map(|code| {
+                        let chosen = *code == country;
+                        let target = code.clone();
+                        div()
+                            .id(SharedString::from(format!("keywords-country-{code}")))
+                            .px(px(9.))
+                            .py(px(3.))
+                            .rounded(px(6.))
+                            .text_xs()
+                            .cursor_pointer()
+                            .when(chosen, |this| this.bg(theme.background).shadow_xs())
+                            .when(!chosen, |this| this.text_color(theme.muted_foreground))
+                            .child(format!("{} {}", flag(code), code.to_uppercase()))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.state.update(cx, |state, cx| state.set_country(&target, cx));
+                            }))
+                    }),
+                ))
+            })
             .child(
                 div()
                     .w(px(200.))

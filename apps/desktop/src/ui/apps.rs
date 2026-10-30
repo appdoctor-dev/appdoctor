@@ -82,6 +82,7 @@ impl AppsView {
         let country = self.country(cx);
         self.adding = true;
         cx.notify();
+        let tracked = self.state.read(cx).apps.iter().map(|app| app.id).collect::<Vec<_>>();
         let task = self.state.update(cx, |state, cx| state.add_app(input, country, cx));
         cx.spawn_in(window, async move |this, cx| {
             let result = task.await;
@@ -90,7 +91,17 @@ impl AppsView {
                 match result {
                     Ok(app) => {
                         this.search.update(cx, |search, cx| search.clear(window, cx));
-                        window.push_notification(Notification::success(format!("Tracking {}", app.name)), cx);
+                        let message = if tracked.contains(&app.id) {
+                            format!(
+                                "Tracking {} in {} {} too",
+                                app.name,
+                                flag(&app.country),
+                                appdoctor_appstore::country(&app.country).map_or_else(|| app.country.to_uppercase(), |c| c.name.to_owned())
+                            )
+                        } else {
+                            format!("Tracking {}", app.name)
+                        };
+                        window.push_notification(Notification::success(message), cx);
                     }
                     Err(error) => window.push_notification(Notification::error(format!("{error:#}")), cx),
                 }
@@ -99,6 +110,58 @@ impl AppsView {
             .ok();
         })
         .detach();
+    }
+}
+
+impl AppsView {
+    /// The storefronts an app is tracked in: each opens its keywords there,
+    /// and all but the first can be removed.
+    fn country_chips(&self, id: u64, home: &str, countries: Vec<String>, cx: &mut Context<Self>) -> Div {
+        let theme = cx.theme().clone();
+        h_flex()
+            .flex_wrap()
+            .gap(px(5.))
+            .children(countries.into_iter().map(|country| {
+                let removable = country != home;
+                let code = country.clone();
+                h_flex()
+                    .id(SharedString::from(format!("app-{id}-country-{country}")))
+                    .gap(px(4.))
+                    .pl(px(7.))
+                    .pr(px(if removable { 3. } else { 7. }))
+                    .py(px(2.))
+                    .rounded(px(6.))
+                    .text_xs()
+                    .bg(theme.foreground.opacity(0.06))
+                    .cursor_pointer()
+                    .hover(|style| style.bg(theme.foreground.opacity(0.1)))
+                    .child(format!("{} {}", flag(&country), country.to_uppercase()))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.state.update(cx, |state, cx| state.open_app_in(id, &code, cx));
+                    }))
+                    .when(removable, |this| {
+                        let code = country.clone();
+                        this.child(
+                            Button::new(SharedString::from(format!("app-{id}-drop-{country}")))
+                                .ghost()
+                                .xsmall()
+                                .icon(IconName::Close)
+                                .tooltip("Stop tracking it here")
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    let result = this.state.update(cx, |state, cx| state.remove_country(id, &code, cx));
+                                    if let Err(error) = result {
+                                        window.push_notification(Notification::error(format!("{error:#}")), cx);
+                                    }
+                                })),
+                        )
+                    })
+            }))
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child("Add it again from another country to track it there too."),
+            )
     }
 }
 
@@ -119,6 +182,7 @@ impl Render for AppsView {
                     .clone()
                     .and_then(|url| icons.update(cx, |icons, cx| icons.get(&url, cx)));
                 let keyword_count = self.state.read(cx).keyword_count(id);
+                let countries = self.state.read(cx).countries(id);
                 card(cx)
                     .id(("app-card", id))
                     .w(px(300.))
@@ -158,9 +222,9 @@ impl Render for AppsView {
                                 app.average_rating,
                                 compact(app.rating_count)
                             ))
-                            .child(format!("{} {}", flag(&app.country), app.country.to_uppercase()))
                             .child(format!("{keyword_count} keywords")),
                     )
+                    .child(self.country_chips(id, &app.country, countries, cx))
                     .child(
                         h_flex()
                             .gap_2()

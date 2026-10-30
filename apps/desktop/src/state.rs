@@ -54,6 +54,8 @@ pub struct AppState {
     /// All keywords of the selected app, every storefront.
     pub keywords: Vec<KeywordRow>,
     keyword_counts: HashMap<u64, usize>,
+    /// The storefronts each app is tracked in, the one it was added from first.
+    countries: HashMap<u64, Vec<String>>,
     pub check: Option<Progress>,
     pub account: Account,
     pub update: UpdateStatus,
@@ -76,6 +78,7 @@ impl AppState {
             country: "us".into(),
             keywords: Vec::new(),
             keyword_counts: HashMap::new(),
+            countries: HashMap::new(),
             check: None,
             update: UpdateStatus::Unknown,
             services,
@@ -127,6 +130,14 @@ impl AppState {
         self.keyword_counts.get(&app_id).copied().unwrap_or(0)
     }
 
+    /// The storefronts an app is tracked in, the one it was added from first.
+    pub fn countries(&self, app_id: u64) -> Vec<String> {
+        match self.countries.get(&app_id) {
+            Some(countries) if !countries.is_empty() => countries.clone(),
+            _ => self.app(app_id).map(|app| vec![app.country.clone()]).unwrap_or_default(),
+        }
+    }
+
     pub fn set_section(&mut self, section: Section, cx: &mut Context<Self>) {
         self.section = section;
         cx.notify();
@@ -149,6 +160,11 @@ impl AppState {
             Ok(apps) => self.apps = apps,
             Err(error) => tracing::error!(%error, "loading apps"),
         }
+        self.countries = self
+            .apps
+            .iter()
+            .map(|app| (app.id, self.services.store.app_countries(app.id).unwrap_or_default()))
+            .collect();
         self.keyword_counts = self
             .apps
             .iter()
@@ -171,6 +187,9 @@ impl AppState {
         };
         if let Some(id) = self.selected_app {
             self.keyword_counts.insert(id, self.keywords.len());
+            if let Ok(countries) = self.services.store.app_countries(id) {
+                self.countries.insert(id, countries);
+            }
         }
         cx.notify();
     }
@@ -190,7 +209,28 @@ impl AppState {
         cx.notify();
     }
 
-    /// Looks the app up on the App Store and starts tracking it.
+    /// Opens an app's keywords in one of its storefronts.
+    pub fn open_app_in(&mut self, id: u64, country: &str, cx: &mut Context<Self>) {
+        self.select_app(id, cx);
+        self.set_country(country, cx);
+        self.section = Section::Keywords;
+        cx.notify();
+    }
+
+    /// Stops tracking an app in one storefront (not the one it was added
+    /// from), with its keywords there.
+    pub fn remove_country(&mut self, id: u64, country: &str, cx: &mut Context<Self>) -> anyhow::Result<()> {
+        self.services.store.remove_app_country(id, country)?;
+        if self.selected_app == Some(id) && self.country == country {
+            self.country = self.app(id).map(|app| app.country.clone()).unwrap_or_else(|| "us".into());
+        }
+        self.reload_apps();
+        self.reload_keywords(cx);
+        Ok(())
+    }
+
+    /// Looks the app up on the App Store and starts tracking it, or, for an
+    /// app already tracked, starts tracking it in another storefront too.
     pub fn add_app(
         &mut self,
         input: String,
@@ -226,9 +266,8 @@ impl AppState {
             let record = lookup.await?;
             this.update(cx, |this, cx| {
                 this.reload_apps();
-                this.select_app(record.id, cx);
-                this.section = Section::Keywords;
-                cx.notify();
+                // Open it in the storefront just added, not the first one.
+                this.open_app_in(record.id, &record.country, cx);
             })?;
             Ok(record)
         })

@@ -16,6 +16,9 @@ use crate::{Event, Task, shorten};
 /// A focused set of tools: small local models choose better among fewer.
 const TOOLS: &[&str] = &[
     "list_apps",
+    "get_keywords",
+    "get_listing",
+    "suggest_listing",
     "get_design",
     "list_themes",
     "create_video",

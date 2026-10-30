@@ -127,6 +127,32 @@ The editor checks the file every 0.7 s. It takes in changes it didn't write
 as one undoable step, and it skips its own save if the file changed
 underneath it, so an agent's edit is never overwritten.
 
+**Improve the listing with AI** (*AI* in the Localization header) uses the
+same chat for the App Store listing.
+- Localization loads the listing from App Store Connect on arrival and saves
+  each pull in the database, so agents can read it.
+- Agents get three tools: `get_keywords` (the keywords tracked in each
+  storefront, with rank, previous rank, Apple popularity, difficulty and the
+  top apps, plus competitors), `get_listing` (each language's fields with
+  lengths and limits, which tracked keywords the name, subtitle and keyword
+  field cover and miss, words the keyword field wastes, and tracked
+  storefronts with no listing in their language) and `suggest_listing`.
+- A suggestion never reaches Apple by itself. It checks Apple's limits,
+  tidies the keyword field (no spaces after commas), drops unchanged fields
+  and is saved for the user. Localization marks the language with a sparkle
+  and shows the AI's note; *Review* puts the text in the fields to edit, and
+  *Review and Save…* sends it with the user's `.p8` key after the usual
+  confirmation. A language the listing lacks (English (U.K.), say) offers
+  *Add English (U.K.)* first.
+- Checked with a real Claude Code run: it read the keywords and listing and
+  suggested an English (U.K.) name and subtitle within the limits.
+
+**Countries.** An app can be tracked in any number of storefronts: add it
+again from another country (or add a keyword in one) and it's tracked there
+too. The Apps card shows each storefront (click to open its keywords, ✕ to
+stop tracking it there), the sidebar shows their flags, and Keywords has a
+switch between them.
+
 **Make with AI** (*AI* in the Screenshots header) works like WowKeywords: it
 uses the AI you already have, so there's no second subscription.
 - It's a chat. It finds Claude Code, Codex (including the copy inside the
@@ -171,7 +197,7 @@ uses the AI you already have, so there's no second subscription.
   - Gemini CLI uses a private settings folder that trusts only AppDoctor's
     server.
 - Ollama: AppDoctor runs the tool loop itself over Ollama's local API, with
-  a focused set of 17 tools.
+  a focused set of 20 tools.
 - Checked against real tools: Claude Code and Codex listed the apps through
   the tools, and a Claude Code follow-up remembered the first answer. Gemini
   CLI refused this machine's Google account (Google moved free individual
