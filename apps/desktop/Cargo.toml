@@ -16,6 +16,7 @@ path = "src/main.rs"
 no-license-check = ["appdoctor-entitlement/no-license-check"]
 
 [dependencies]
+appdoctor-ai.workspace = true
 appdoctor-apple-ads.workspace = true
 appdoctor-appstore.workspace = true
 appdoctor-asc.workspace = true

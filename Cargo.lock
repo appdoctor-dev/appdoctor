@@ -199,6 +199,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
+name = "appdoctor-ai"
+version = "0.1.0"
+dependencies = [
+ "appdoctor-mcp",
+ "serde_json",
+]
+
+[[package]]
 name = "appdoctor-apple-ads"
 version = "0.1.0"
 dependencies = [
@@ -245,6 +253,7 @@ name = "appdoctor-desktop"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "appdoctor-ai",
  "appdoctor-apple-ads",
  "appdoctor-appstore",
  "appdoctor-asc",

@@ -12,6 +12,7 @@
 //! step.
 
 mod agent;
+mod ai;
 mod clips;
 mod inspector;
 mod view;
@@ -188,6 +189,9 @@ pub struct ScreenshotsView {
     /// The playhead, in seconds.
     time: f32,
     clips: ClipFrames,
+    /// The "Make with AI" panel, shown in place of the inspector.
+    ai: Entity<ai::AiPanel>,
+    ai_open: bool,
     _ticker: Option<Task<()>>,
     _clips: Task<()>,
     _save: Option<Task<()>>,
@@ -227,6 +231,10 @@ impl ScreenshotsView {
             time: seconds(1., 0.001, cx),
         };
         let (clip_frames, clips_task) = ClipFrames::new(cx);
+        let ai = {
+            let (state, view) = (state.clone(), cx.entity().downgrade());
+            cx.new(|cx| ai::AiPanel::new(state, view, window, cx))
+        };
 
         let fonts = cx.new(|cx| FontSelect::new(SearchableVec::new(Vec::new()), None, window, cx).searchable(true));
         let model_items: Vec<ModelItem> = DeviceModel::all()
@@ -451,6 +459,8 @@ impl ScreenshotsView {
             playing: false,
             time: 0.,
             clips: clip_frames,
+            ai,
+            ai_open: false,
             _ticker: None,
             _clips: clips_task,
             _save: None,

@@ -1185,12 +1185,17 @@ impl Render for ScreenshotsView {
             )
             .child(
                 Button::new("ai-agent")
-                    .ghost()
                     .small()
+                    .map(|button| if self.ai_open { button.primary() } else { button.ghost() })
                     .icon(gpui_kit::assets::IconName::Sparkles)
-                    .label("AI agent")
-                    .tooltip("Let your AI agent design these")
-                    .on_click(cx.listener(|this, _, window, cx| this.open_agent_dialog(window, cx))),
+                    .label("AI")
+                    .tooltip("Make with AI: Claude Code, Codex, Gemini or Ollama")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.ai_open = !this.ai_open;
+                        let left = this.left_open;
+                        this.set_panels(left, true, cx);
+                        cx.notify();
+                    })),
             )
             .when(self.design.video.is_some(), |this| {
                 this.child(
@@ -1334,7 +1339,11 @@ impl Render for ScreenshotsView {
             RIGHT_PANEL,
             self.panel_epoch,
             "right-panel",
-            self.inspector(cx).into_any_element(),
+            if self.ai_open {
+                self.ai.clone().into_any_element()
+            } else {
+                self.inspector(cx).into_any_element()
+            },
         );
 
         v_flex()

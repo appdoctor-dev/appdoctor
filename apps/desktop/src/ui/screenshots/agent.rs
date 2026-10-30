@@ -17,7 +17,7 @@ use crate::ui::controls::{group, heading, separator};
 
 /// How an AI app starts AppDoctor's server: this executable with `mcp`,
 /// plus the data folder when it isn't the default.
-fn launch() -> Launch {
+pub(super) fn launch() -> Launch {
     Launch {
         command: std::env::current_exe()
             .map(|path| path.display().to_string())

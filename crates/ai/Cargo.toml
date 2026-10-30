@@ -1,0 +1,11 @@
+[package]
+name = "appdoctor-ai"
+description = "AppDoctor's in-app AI: runs the user's own AI (Claude Code, Codex, Gemini CLI, Ollama) with AppDoctor's tools."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+appdoctor-mcp.workspace = true
+serde_json.workspace = true

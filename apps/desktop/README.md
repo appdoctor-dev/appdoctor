@@ -47,6 +47,7 @@ crates/scoring          keyword difficulty from the top 10, candidate keywords f
 crates/screenshots      screenshot designs: model, device frames, font measuring, SVG layout, PNG render via resvg (opt-level 3)
 crates/mcp              `appdoctor mcp`: local stdio MCP server for the user's own AI agent, and one-click setup of AI apps
 crates/video            AVFoundation on macOS: decodes screen recordings, encodes H.264 MP4 (app previews, header and search videos)
+crates/ai               in-app AI: runs the user's own Claude Code, Codex or Gemini CLI headless with AppDoctor's MCP tools, or drives Ollama over its local API
 crates/jwt              ES256 signing and P-256 key handling for both Apple APIs
 crates/asc              App Store Connect: localizations, builds, build upload, App Review submissions (confirm-gated)
 crates/apple-ads        Apple Ads Platform API 1.0: client secret, token, ACLs, popularity, suggestions
@@ -125,6 +126,29 @@ Each call reads the design file, changes it and writes it back atomically.
 The editor checks the file every 0.7 s. It takes in changes it didn't write
 as one undoable step, and it skips its own save if the file changed
 underneath it, so an agent's edit is never overwritten.
+
+**Make with AI** (*AI* in the Screenshots header) works like WowKeywords: it
+uses the AI you already have, so there's no second subscription.
+- It finds Claude Code, Codex (including the copy inside the ChatGPT app and
+  its editor extension), Gemini CLI and Ollama with its models.
+- You type what to make, or pick a suggestion, and it runs.
+- Command-line tools run headless with AppDoctor's MCP server attached for
+  that run only:
+  - Claude Code uses `claude -p` with `--strict-mcp-config`, allowed only
+    AppDoctor's tools, plus Read, Glob and Grep when you share the app's
+    code folder.
+  - Codex uses `codex exec --json` with the server passed through `-c`.
+  - Gemini CLI uses a private settings folder that trusts only AppDoctor's
+    server.
+- Ollama: AppDoctor runs the tool loop itself over Ollama's local API, with
+  a focused set of 16 tools.
+- Progress streams into the panel, and the design updates live.
+- Checked against real tools: Claude Code and Codex listed the apps through
+  the tools. Gemini CLI refused this machine's Google account (Google moved
+  free individual use to Antigravity), and AppDoctor shows that message.
+  Ollama is tested against a stand-in server; it wasn't running here.
+- The panel itself hasn't been seen on screen, because the window was
+  covered.
 
 *AI agent* in the Screenshots header finds the AI apps installed on this
 computer: Claude, Claude Code, Cursor, VS Code, Windsurf, Codex, Gemini CLI,
