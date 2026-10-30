@@ -20,6 +20,7 @@ fn main() {
         provider,
         path: found.path,
         model,
+        effort: std::env::var("EFFORT").ok(),
         prompt,
         context: "You are testing AppDoctor's tools. Answer briefly.".into(),
         launch: Launch {
@@ -28,7 +29,10 @@ fn main() {
             env: vec![("APPDOCTOR_DATA_DIR".into(), data_dir.display().to_string())],
         },
         data_dir,
-        project: None,
+        project: std::env::var_os("PROJECT").map(Into::into),
+        // RESUME=<id from a Session event> carries on a conversation.
+        resume: std::env::var("RESUME").ok(),
+        history: Vec::new(),
     };
     run(&task, &mut |event| println!("{event:?}"), Arc::new(AtomicBool::new(false)));
 }

@@ -17,9 +17,11 @@ static EXTRA: &[(&str, &[u8])] = extra_icons![
     "image",
     "key-round",
     "languages",
+    "lightbulb",
     "lock",
     "lock-open",
     "log-out",
+    "message-square-plus",
     "panel-right-close",
     "panel-top",
     "pause",
@@ -35,6 +37,8 @@ static EXTRA: &[(&str, &[u8])] = extra_icons![
     "trending-up",
     "type",
     "users",
+    "volume-2",
+    "wand-sparkles",
     "zoom-in",
 ];
 

@@ -129,26 +129,49 @@ underneath it, so an agent's edit is never overwritten.
 
 **Make with AI** (*AI* in the Screenshots header) works like WowKeywords: it
 uses the AI you already have, so there's no second subscription.
-- It finds Claude Code, Codex (including the copy inside the ChatGPT app and
-  its editor extension), Gemini CLI and Ollama with its models.
-- You type what to make, or pick a suggestion, and it runs.
+- It's a chat. It finds Claude Code, Codex (including the copy inside the
+  ChatGPT app and its editor extension), Gemini CLI and Ollama with its
+  models, each shown with its own mark (`assets/logos`, sources in
+  `SOURCES.md`).
+- *Model and effort*: a line under the providers opens to choose. Claude
+  Code offers Fable, Opus, Sonnet and Haiku with effort from Low to Max
+  (`--model`, `--effort`). Codex offers the models in its own list
+  (`~/.codex/models_cache.json`) with each one's effort levels (`-m`,
+  `model_reasoning_effort`). Gemini CLI offers Pro, Flash and Flash-Lite,
+  and Ollama its downloaded models. *Default* leaves the tool's own setting.
+  Choices are saved per provider.
+- *Project folder*: share the folder with the app's code and the AI reads it
+  (and runs in it, so the project's CLAUDE.md or AGENTS.md applies). For an
+  app without one, AppDoctor looks in the usual places (~/Apps, ~/Developer,
+  ~/Projects and so on) for a folder named after the app or its bundle ID and
+  offers it.
+- You type a request (Enter sends, ⇧Enter adds a line) or pick a
+  suggestion. Follow-ups carry on the same conversation: Claude Code and
+  Codex resume their own session; Gemini CLI and Ollama get the earlier
+  exchanges.
+- The chat shows what the AI does in plain words ("Reading README.md",
+  "Drew a picture", "Looked at the storyboard"), not tool calls. Long runs
+  fold their earlier steps away, failures say why in a line, and its replies
+  stream in word by word (Claude Code's partial messages; others are
+  revealed at a steady pace). The chat glides to the newest message unless
+  you scroll back.
 - Command-line tools run headless with AppDoctor's MCP server attached for
   that run only:
-  - Claude Code uses `claude -p` with `--strict-mcp-config`, allowed only
-    AppDoctor's tools, plus Read, Glob and Grep when you share the app's
-    code folder.
-  - Codex uses `codex exec --json` with the server passed through `-c`.
+  - Claude Code uses `claude -p` with `--strict-mcp-config`. Its built-in
+    tools are cut to Read, Glob and Grep with a project folder, none
+    without, so it never asks for a command that a headless run would have
+    to refuse.
+  - Codex uses `codex exec --json` (`exec resume` for follow-ups) with the
+    server passed through `-c`.
   - Gemini CLI uses a private settings folder that trusts only AppDoctor's
     server.
 - Ollama: AppDoctor runs the tool loop itself over Ollama's local API, with
-  a focused set of 16 tools.
-- Progress streams into the panel, and the design updates live.
+  a focused set of 17 tools.
 - Checked against real tools: Claude Code and Codex listed the apps through
-  the tools. Gemini CLI refused this machine's Google account (Google moved
-  free individual use to Antigravity), and AppDoctor shows that message.
-  Ollama is tested against a stand-in server; it wasn't running here.
-- The panel itself hasn't been seen on screen, because the window was
-  covered.
+  the tools, and a Claude Code follow-up remembered the first answer. Gemini
+  CLI refused this machine's Google account (Google moved free individual
+  use to Antigravity), and AppDoctor shows that message. Ollama is tested
+  against a stand-in server; it wasn't running here.
 
 *AI agent* in the Screenshots header finds the AI apps installed on this
 computer: Claude, Claude Code, Cursor, VS Code, Windsurf, Codex, Gemini CLI,
@@ -246,6 +269,13 @@ Every section in the sidebar is a page of this one window.
     using the font's real glyph widths (ttf-parser through fontdb, the same
     fonts resvg renders), so the canvas and the export break lines in the
     same places.
+  - **Drawings.** *Image* also takes an SVG, and agents send one with
+    `import_svg`. Each top-level element becomes its own layer: `<text>`
+    becomes editable text, plain rectangles and circles become shapes,
+    `<image>` an image layer, and anything else (paths, groups, gradients)
+    a *Drawing* layer that keeps its SVG and stays sharp at any size. So an
+    illustration an AI draws comes in as pieces you can move, resize and
+    retype.
   - Drag a layer to move it; it snaps to the canvas and to other layers
     (hold ⌥ to skip snapping). Drag a corner to resize it; phones keep their
     shape, and ⇧ keeps any layer's. You can also type X, Y, W and H.

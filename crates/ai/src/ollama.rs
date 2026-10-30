@@ -26,6 +26,7 @@ const TOOLS: &[&str] = &[
     "set_camera",
     "add_callout",
     "add_sound",
+    "import_svg",
     "render_storyboard",
     "review_video",
     "simulator_screenshot",
@@ -133,10 +134,12 @@ fn chat(host: &str, model: &str, task: &Task, on_event: &mut dyn FnMut(Event), c
             })
         })
         .collect();
-    let mut messages = vec![
-        json!({ "role": "system", "content": task.context }),
-        json!({ "role": "user", "content": task.prompt }),
-    ];
+    let mut messages = vec![json!({ "role": "system", "content": task.context })];
+    for (asked, answered) in &task.history {
+        messages.push(json!({ "role": "user", "content": asked }));
+        messages.push(json!({ "role": "assistant", "content": answered }));
+    }
+    messages.push(json!({ "role": "user", "content": task.prompt }));
     for _ in 0..STEPS {
         if cancel.load(Ordering::Relaxed) {
             on_event(Event::Failed("Stopped.".into()));
@@ -169,7 +172,7 @@ fn chat(host: &str, model: &str, task: &Task, on_event: &mut dyn FnMut(Event), c
             };
             on_event(Event::Tool {
                 name: name.clone(),
-                input: shorten(&arguments.to_string(), 160),
+                input: arguments.clone(),
             });
             let answer = server
                 .handle(&json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": { "name": name, "arguments": arguments } }).to_string())
@@ -258,6 +261,7 @@ mod tests {
             provider: Provider::Ollama,
             path: PathBuf::from("ollama"),
             model: Some("qwen3".into()),
+            effort: None,
             prompt: "What apps are there?".into(),
             context: "Test.".into(),
             launch: Launch {
@@ -267,6 +271,8 @@ mod tests {
             },
             data_dir: std::env::temp_dir().join(format!("appdoctor-ai-test-{}", std::process::id())),
             project: None,
+            resume: None,
+            history: Vec::new(),
         };
         let mut events = Vec::new();
         chat(&host, "qwen3", &task, &mut |event| events.push(event), &Arc::new(AtomicBool::new(false))).unwrap();

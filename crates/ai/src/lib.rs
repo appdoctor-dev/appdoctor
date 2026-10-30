@@ -19,6 +19,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 pub use appdoctor_mcp::clients::Launch;
+use serde_json::Value;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Provider {
@@ -68,10 +69,107 @@ impl Provider {
 pub struct Found {
     pub provider: Provider,
     pub path: PathBuf,
-    /// Ollama's downloaded models; empty for the others.
-    pub models: Vec<String>,
+    /// The models to choose from: Ollama's downloaded ones, the others'
+    /// own list. Leaving it unchosen uses the provider's default (Ollama
+    /// has none, so needs one).
+    pub models: Vec<Model>,
+    /// What the provider's default is, when it says ("GPT-5.6-Sol").
+    pub default_model: Option<Model>,
     /// What stands in the way, if anything ("Ollama isn't running").
     pub problem: Option<String>,
+}
+
+/// A model a provider offers.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Model {
+    /// What the provider's `--model` takes.
+    pub id: String,
+    pub label: String,
+    /// How hard it can think (`low` … `max`), weakest first; empty when
+    /// there's no choice.
+    pub efforts: Vec<String>,
+}
+
+impl Model {
+    fn new(id: &str, label: &str, efforts: &[&str]) -> Model {
+        Model {
+            id: id.to_owned(),
+            label: label.to_owned(),
+            efforts: efforts.iter().map(|e| (*e).to_owned()).collect(),
+        }
+    }
+}
+
+/// An effort level in words.
+pub fn effort_label(effort: &str) -> String {
+    match effort {
+        "xhigh" => "Extra high".to_owned(),
+        other => {
+            let mut chars = other.chars();
+            chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default()
+        }
+    }
+}
+
+const CLAUDE_EFFORTS: &[&str] = &["low", "medium", "high", "xhigh", "max"];
+
+/// Claude Code's aliases for the latest of each model.
+fn claude_models() -> Vec<Model> {
+    vec![
+        Model::new("fable", "Fable", CLAUDE_EFFORTS),
+        Model::new("opus", "Opus", CLAUDE_EFFORTS),
+        Model::new("sonnet", "Sonnet", CLAUDE_EFFORTS),
+        Model::new("haiku", "Haiku", &[]),
+    ]
+}
+
+/// Gemini CLI's aliases.
+fn gemini_models() -> Vec<Model> {
+    vec![
+        Model::new("pro", "Pro", &[]),
+        Model::new("flash", "Flash", &[]),
+        Model::new("flash-lite", "Flash-Lite", &[]),
+    ]
+}
+
+/// The models Codex lists, from the list it keeps (`models_cache.json`),
+/// and the one its settings choose.
+fn codex_models() -> (Vec<Model>, Option<Model>) {
+    let home = std::env::var_os("CODEX_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".codex")));
+    let Some(home) = home else {
+        return (Vec::new(), None);
+    };
+    let cache: Value = std::fs::read_to_string(home.join("models_cache.json"))
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or(Value::Null);
+    let all: Vec<(Model, bool)> = cache["models"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|model| {
+            let id = model["slug"].as_str()?;
+            let efforts = model["supported_reasoning_levels"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|level| level["effort"].as_str())
+                .collect::<Vec<_>>();
+            let label = model["display_name"].as_str().unwrap_or(id);
+            Some((Model::new(id, label, &efforts), model["visibility"] == "list"))
+        })
+        .collect();
+    let chosen = std::fs::read_to_string(home.join("config.toml")).ok().and_then(|config| {
+        config.lines().find_map(|line| {
+            let value = line.trim().strip_prefix("model")?.trim_start().strip_prefix('=')?;
+            Some(value.trim().trim_matches('"').to_owned())
+        })
+    });
+    let default = chosen.and_then(|id| all.iter().find(|(model, _)| model.id == id).map(|(model, _)| model.clone()));
+    let listed = all.into_iter().filter(|(_, listed)| *listed).map(|(model, _)| model).collect();
+    (listed, default)
 }
 
 /// Where command-line tools live. Apps opened from the Dock don't get the
@@ -135,18 +233,22 @@ pub fn detect() -> Vec<Found> {
         .into_iter()
         .filter_map(|provider| {
             let path = which(provider.command())?;
-            let (models, problem) = match provider {
+            let (mut models, mut default_model, mut problem) = (Vec::new(), None, None);
+            match provider {
+                Provider::ClaudeCode => models = claude_models(),
+                Provider::Codex => (models, default_model) = codex_models(),
+                Provider::Gemini => models = gemini_models(),
                 Provider::Ollama => match ollama::models() {
-                    Ok(models) if models.is_empty() => (models, Some("No models yet: `ollama pull qwen3`".into())),
-                    Ok(models) => (models, None),
-                    Err(_) => (Vec::new(), Some("Ollama isn't running: open the Ollama app".into())),
+                    Ok(names) if names.is_empty() => problem = Some("No models yet: `ollama pull qwen3`".into()),
+                    Ok(names) => models = names.iter().map(|name| Model::new(name, name, &[])).collect(),
+                    Err(_) => problem = Some("Ollama isn't running: open the Ollama app".into()),
                 },
-                _ => (Vec::new(), None),
-            };
+            }
             Some(Found {
                 provider,
                 path,
                 models,
+                default_model,
                 problem,
             })
         })
@@ -156,10 +258,17 @@ pub fn detect() -> Vec<Found> {
 /// What happened, as the AI works.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
-    /// The AI's own words.
+    /// The conversation's id, to carry on from it next time.
+    Session(String),
+    /// More of the words it's writing, as they come.
+    Delta(String),
+    /// A whole message of its own words (the end of any deltas before it).
     Text(String),
-    /// It called a tool (AppDoctor's tools without their prefix).
-    Tool { name: String, input: String },
+    /// What it's thinking about, for providers that say.
+    Thinking(String),
+    /// It called a tool (AppDoctor's tools without their prefix): `shell`
+    /// for a command, the provider's own names for its others.
+    Tool { name: String, input: Value },
     /// A tool's answer, shortened.
     Result { text: String, failed: bool },
     /// It finished; the summary is its last words, if any.
@@ -172,8 +281,11 @@ pub struct Task {
     pub provider: Provider,
     /// The provider's executable, from [`detect`].
     pub path: PathBuf,
-    /// A model name: Ollama's must be set; the others use their default.
+    /// A model's id: Ollama's must be set; the others use their default
+    /// when it isn't.
     pub model: Option<String>,
+    /// How hard it thinks (`low` … `max`), for the models that take one.
+    pub effort: Option<String>,
     pub prompt: String,
     /// What it's working on: the app, the design, how to work.
     pub context: String,
@@ -183,6 +295,26 @@ pub struct Task {
     pub data_dir: PathBuf,
     /// The app's source code, which the AI may read.
     pub project: Option<PathBuf>,
+    /// The conversation to carry on (from [`Event::Session`]), for the
+    /// providers that keep their own.
+    pub resume: Option<String>,
+    /// Earlier requests and answers in this chat, for the others.
+    pub history: Vec<(String, String)>,
+}
+
+impl Task {
+    /// The request, after any earlier exchanges it follows on from.
+    fn prompt_with_history(&self) -> String {
+        if self.history.is_empty() {
+            return self.prompt.clone();
+        }
+        let mut text = String::from("Earlier in this conversation:\n");
+        for (asked, answered) in &self.history {
+            text.push_str(&format!("\nThe user asked: {asked}\nYou answered: {answered}\n"));
+        }
+        text.push_str(&format!("\nNow the user asks: {}", self.prompt));
+        text
+    }
 }
 
 /// Runs a task to the end, reporting as it goes; blocks, so call it on a
@@ -198,14 +330,25 @@ pub fn run(task: &Task, on_event: &mut dyn FnMut(Event), cancel: Arc<AtomicBool>
 }
 
 /// The working rules every provider gets before the user's request.
-pub fn context(app: &str, app_id: u64, device: &str, design_folder: &Path) -> String {
+pub fn context(app: &str, app_id: u64, device: &str, design_folder: &Path, project: Option<&Path>) -> String {
+    let project = match project {
+        Some(project) => format!(
+            "The app's source code is in {} (your working folder): read its README and the screens that matter to \
+             learn what the app does and how it looks, and use its real words, colours and features. You can read \
+             files there but not run commands.",
+            project.display()
+        ),
+        None => "You don't have the app's source code; get_design and the App Store listing are what you know.".into(),
+    };
     format!(
         "You are working inside AppDoctor, a Mac app for App Store marketing, on the app \"{app}\" (app_id {app_id}). \
          Work on its \"{device}\" design (pass app_id {app_id} and device \"{device}\" to the appdoctor tools). \
-         The user watches the design change live in AppDoctor as you work. Make sensible choices instead of asking \
+         {project} The user watches the design change live in AppDoctor and chats with you in a small panel, so \
+         keep your messages short and plain, without tables or code. Make sensible choices instead of asking \
          questions. For videos, start with create_video, look at your work with render_storyboard, check it with \
-         review_video and fix what it reports. Screens and recordings of the app may be in {}; the simulator tools \
-         can record new ones. Finish with a one-paragraph summary of what you made.",
+         review_video and fix what it reports. To draw a picture, icon or illustration, write SVG and add it with \
+         import_svg, so each part becomes a layer the user can move. Screens and recordings of the app may be in \
+         {}; the simulator tools can record new ones. Finish with two or three sentences on what you made.",
         design_folder.display()
     )
 }

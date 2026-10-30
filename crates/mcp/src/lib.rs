@@ -34,7 +34,9 @@ tools. Any design can also be a video \
 (set_video): slides become scenes, layers enter, leave and drift (the motion properties), device screens can \
 play screen recordings, render_frame shows any moment and export_video writes the MP4. To show the app in \
 motion, build it, run it in the iOS Simulator and record it with `xcrun simctl io booted recordVideo --codec \
-h264 <file>.mov`; read the app's own code to find what's worth showing. Start with list_apps and get_design, use design_options and list_fonts for \
+h264 <file>.mov`; read the app's own code to find what's worth showing. To add a picture, icon or illustration, draw it as SVG \
+and add it with import_svg: each top-level element becomes a layer the user can move and edit, and <text> stays \
+editable words. Start with list_apps and get_design, use design_options and list_fonts for \
 allowed values, and look at your work with render_slide before you say it's done. The user sees every \
 change live in AppDoctor and can undo it.";
 

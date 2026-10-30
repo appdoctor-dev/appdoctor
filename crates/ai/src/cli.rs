@@ -49,32 +49,47 @@ fn toml(text: &str) -> String {
 pub(crate) fn run(task: &Task, on_event: &mut dyn FnMut(Event), cancel: &Arc<AtomicBool>) -> Result<(), String> {
     let scratch = scratch()?;
     let mut command = Command::new(&task.path);
-    let full_prompt = format!("{}\n\n{}", task.context, task.prompt);
+    let prompt = task.prompt_with_history();
+    let full_prompt = format!("{}\n\n{prompt}", task.context);
     match task.provider {
         Provider::ClaudeCode => {
             let config = scratch.join("mcp.json");
             std::fs::write(&config, json!({ "mcpServers": { "appdoctor": server(task) } }).to_string())
                 .map_err(|error| error.to_string())?;
-            let allowed = if task.project.is_some() {
-                "mcp__appdoctor,Read,Glob,Grep"
+            // Only the tools it may use are offered, so it never reaches
+            // for one that would need the user's approval (which a
+            // headless run can't ask for).
+            let (offered, allowed) = if task.project.is_some() {
+                ("Read,Glob,Grep", "mcp__appdoctor,Read,Glob,Grep")
             } else {
-                "mcp__appdoctor"
+                ("", "mcp__appdoctor")
             };
             command
                 .arg("-p")
-                .args(["--output-format", "stream-json", "--verbose"])
+                .args(["--output-format", "stream-json", "--verbose", "--include-partial-messages"])
                 .arg("--mcp-config")
                 .arg(&config)
                 .arg("--strict-mcp-config")
+                .args(["--tools", offered])
                 .args(["--allowedTools", allowed])
                 .args(["--append-system-prompt", &task.context]);
             if let Some(model) = &task.model {
                 command.args(["--model", model]);
             }
-            command.arg(&task.prompt);
+            if let Some(effort) = &task.effort {
+                command.args(["--effort", effort]);
+            }
+            match &task.resume {
+                Some(session) => command.args(["--resume", session]).arg(&task.prompt),
+                None => command.arg(&prompt),
+            };
         }
         Provider::Codex => {
-            command.args(["exec", "--json", "--skip-git-repo-check"]);
+            command.arg("exec");
+            if task.resume.is_some() {
+                command.arg("resume");
+            }
+            command.args(["--json", "--skip-git-repo-check"]);
             command.args(["-c", &format!("mcp_servers.appdoctor.command={}", toml(&task.launch.command))]);
             let args: Vec<String> = task.launch.args.iter().map(|arg| toml(arg)).collect();
             command.args(["-c", &format!("mcp_servers.appdoctor.args=[{}]", args.join(","))]);
@@ -84,10 +99,14 @@ pub(crate) fn run(task: &Task, on_event: &mut dyn FnMut(Event), cancel: &Arc<Ato
             if let Some(model) = &task.model {
                 command.args(["-m", model]);
             }
-            if let Some(project) = &task.project {
-                command.arg("-C").arg(project);
+            if let Some(effort) = &task.effort {
+                command.args(["-c", &format!("model_reasoning_effort={}", toml(effort))]);
             }
-            command.arg(&full_prompt);
+            match &task.resume {
+                // It already has the context from the first message.
+                Some(session) => command.arg(session).arg(&task.prompt),
+                None => command.arg(&full_prompt),
+            };
         }
         Provider::Gemini => {
             // Gemini reads MCP servers from the working folder's settings;
@@ -203,15 +222,34 @@ pub(crate) fn parse(provider: Provider, line: &str) -> Vec<Event> {
 fn claude(message: &Value) -> Vec<Event> {
     let blocks = || message["message"]["content"].as_array().cloned().unwrap_or_default();
     match message["type"].as_str() {
+        Some("system") if message["subtype"] == "init" => message["session_id"]
+            .as_str()
+            .map(|id| vec![Event::Session(id.to_owned())])
+            .unwrap_or_default(),
+        // With --include-partial-messages: the words as they're written.
+        Some("stream_event") => {
+            let event = &message["event"];
+            match (event["type"].as_str(), event["delta"]["type"].as_str()) {
+                (Some("content_block_delta"), Some("text_delta")) => event["delta"]["text"]
+                    .as_str()
+                    .map(|text| vec![Event::Delta(text.to_owned())])
+                    .unwrap_or_default(),
+                _ => Vec::new(),
+            }
+        }
         Some("assistant") => blocks()
             .iter()
             .filter_map(|block| match block["type"].as_str() {
                 Some("text") => block["text"].as_str().map(|text| Event::Text(text.to_owned())),
+                Some("thinking") => block["thinking"]
+                    .as_str()
+                    .filter(|text| !text.trim().is_empty())
+                    .map(|text| Event::Thinking(text.to_owned())),
                 // Claude Code's own tool loader isn't the user's business.
                 Some("tool_use") if block["name"] == "ToolSearch" => None,
                 Some("tool_use") => Some(Event::Tool {
                     name: tool_name(block["name"].as_str().unwrap_or("tool")),
-                    input: shorten(&block["input"].to_string(), 160),
+                    input: block["input"].clone(),
                 }),
                 _ => None,
             })
@@ -254,6 +292,40 @@ fn claude(message: &Value) -> Vec<Event> {
 fn generic(message: &Value) -> Vec<Event> {
     let item = if message["item"].is_object() { &message["item"] } else { message };
     let kind = item["type"].as_str().or(message["type"].as_str()).unwrap_or_default();
+    let started = message["type"] == "item.started";
+    let completed = message["type"] == "item.completed";
+    match kind {
+        // Codex's thread, to resume; Gemini's session.
+        "thread.started" | "init" => {
+            return message["thread_id"]
+                .as_str()
+                .or(message["session_id"].as_str())
+                .map(|id| vec![Event::Session(id.to_owned())])
+                .unwrap_or_default();
+        }
+        "reasoning" if completed => {
+            return item["text"]
+                .as_str()
+                .filter(|text| !text.trim().is_empty())
+                .map(|text| vec![Event::Thinking(text.to_owned())])
+                .unwrap_or_default();
+        }
+        "reasoning" => return Vec::new(),
+        "command_execution" if started => {
+            return vec![Event::Tool {
+                name: "shell".into(),
+                input: json!({ "command": item["command"] }),
+            }];
+        }
+        "command_execution" if completed => {
+            return vec![Event::Result {
+                text: shorten(item["aggregated_output"].as_str().unwrap_or_default(), 200),
+                failed: item["exit_code"].as_i64().is_some_and(|code| code != 0),
+            }];
+        }
+        "command_execution" => return Vec::new(),
+        _ => {}
+    }
     let tool = item["tool"]
         .as_str()
         .or(item["tool_name"].as_str())
@@ -263,14 +335,14 @@ fn generic(message: &Value) -> Vec<Event> {
         && message["type"] != "item.completed"
         && let Some(name) = tool
     {
-        let input = item["arguments"]
-            .as_object()
-            .map(|_| item["arguments"].to_string())
-            .or_else(|| item["parameters"].as_object().map(|_| item["parameters"].to_string()))
-            .unwrap_or_default();
+        let input = [&item["arguments"], &item["parameters"]]
+            .into_iter()
+            .find(|value| value.is_object())
+            .cloned()
+            .unwrap_or(Value::Null);
         return vec![Event::Tool {
             name: tool_name(name),
-            input: shorten(&input, 160),
+            input,
         }];
     }
     if kind.contains("result") || (kind.contains("tool") && message["type"] == "item.completed") {
@@ -302,6 +374,8 @@ fn generic(message: &Value) -> Vec<Event> {
     }
     let text = item["text"].as_str().or(item["content"].as_str()).or(message["delta"].as_str());
     match text {
+        // Gemini streams its words in pieces.
+        Some(text) if item["role"] != "user" && message["delta"] == true => vec![Event::Delta(text.to_owned())],
         Some(text) if item["role"] != "user" && !text.trim().is_empty() => vec![Event::Text(text.to_owned())],
         _ => Vec::new(),
     }
@@ -320,7 +394,7 @@ mod tests {
                 Event::Text("Making it.".into()),
                 Event::Tool {
                     name: "create_video".into(),
-                    input: r#"{"app_id":1}"#.into()
+                    input: json!({ "app_id": 1 })
                 }
             ]
         );
@@ -328,7 +402,12 @@ mod tests {
         assert!(matches!(&parse(Provider::ClaudeCode, result)[0], Event::Result { text, failed: false } if text.contains("scenes")));
         let done = r#"{"type":"result","subtype":"success","is_error":false,"result":"Five scenes, sunset theme."}"#;
         assert_eq!(parse(Provider::ClaudeCode, done), vec![Event::Done("Five scenes, sunset theme.".into())]);
-        assert!(parse(Provider::ClaudeCode, r#"{"type":"system","subtype":"init"}"#).is_empty());
+        assert_eq!(
+            parse(Provider::ClaudeCode, r#"{"type":"system","subtype":"init","session_id":"abc"}"#),
+            vec![Event::Session("abc".into())]
+        );
+        let delta = r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Mak"}}}"#;
+        assert_eq!(parse(Provider::ClaudeCode, delta), vec![Event::Delta("Mak".into())]);
     }
 
     #[test]
@@ -346,5 +425,13 @@ mod tests {
         let gemini = r#"{"type":"tool_use","tool_name":"create_video","parameters":{"app_id":1}}"#;
         assert!(matches!(&parse(Provider::Gemini, gemini)[0], Event::Tool { name, .. } if name == "create_video"));
         assert_eq!(parse(Provider::Gemini, "plain words"), vec![Event::Text("plain words".into())]);
+        let piece = r#"{"type":"message","role":"assistant","content":"Hel","delta":true}"#;
+        assert_eq!(parse(Provider::Gemini, piece), vec![Event::Delta("Hel".into())]);
+        let thread = r#"{"type":"thread.started","thread_id":"t-1"}"#;
+        assert_eq!(parse(Provider::Codex, thread), vec![Event::Session("t-1".into())]);
+        let thought = r#"{"type":"item.completed","item":{"type":"reasoning","text":"**Planning the video**"}}"#;
+        assert_eq!(parse(Provider::Codex, thought), vec![Event::Thinking("**Planning the video**".into())]);
+        let shell = r#"{"type":"item.started","item":{"type":"command_execution","command":"ls","status":"in_progress"}}"#;
+        assert!(matches!(&parse(Provider::Codex, shell)[0], Event::Tool { name, .. } if name == "shell"));
     }
 }

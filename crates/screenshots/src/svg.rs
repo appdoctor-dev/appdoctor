@@ -331,6 +331,15 @@ fn layer_svg(layer: &Layer, index: usize, part: Part, words: Option<f32>, defs: 
                 ));
             }
         }
+        // The drawing as a nested SVG image, so its own ids and styles stay
+        // its own.
+        LayerKind::Vector { svg } => {
+            use base64::Engine as _;
+            body.push_str(&format!(
+                r#"<image x="{x}" y="{y}" width="{width}" height="{height}" preserveAspectRatio="none" xlink:href="data:image/svg+xml;base64,{}"/>"#,
+                base64::engine::general_purpose::STANDARD.encode(svg)
+            ));
+        }
         LayerKind::Shape {
             fill,
             radius,

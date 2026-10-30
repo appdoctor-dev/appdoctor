@@ -19,6 +19,7 @@ mod legacy;
 pub mod motion;
 mod render;
 mod svg;
+mod svg_import;
 mod text;
 pub mod themes;
 
@@ -32,6 +33,7 @@ pub use device::{DeviceGeometry, DeviceModel, Frame, device_geometry};
 pub use motion::{Drift, Effect, Focus, Motion, Sound, SoundEffect, Transition, Video};
 pub use render::{ClipSource, NoClips, render_frame, render_png, render_png_with, render_slide};
 pub use svg::to_svg;
+pub use svg_import::{Placement, import_svg, rasterize_svg};
 pub use themes::{THEMES, Theme, theme};
 pub use text::{
     DEFAULT_FONT, SUGGESTED_FONTS, Style, Word, font_families, has_font, strip_marks, warm_fonts, wrap, wrap_styled,
@@ -410,6 +412,11 @@ pub enum LayerKind {
         #[serde(default, skip_serializing_if = "is_zero")]
         soft: f32,
     },
+    /// A drawing: a whole SVG document whose viewBox fills the layer, from
+    /// an imported or AI-drawn picture. Exported as vectors.
+    Vector {
+        svg: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -429,12 +436,13 @@ impl Layer {
             LayerKind::Device { .. } => "Device",
             LayerKind::Image { .. } => "Image",
             LayerKind::Shape { .. } => "Shape",
+            LayerKind::Vector { .. } => "Vector",
         }
     }
 
     /// Whether resizing keeps the width:height ratio.
     pub fn keeps_aspect(&self) -> bool {
-        matches!(self.kind, LayerKind::Device { .. })
+        matches!(self.kind, LayerKind::Device { .. } | LayerKind::Vector { .. })
     }
 
     /// How a text layer is set, for measuring; `None` for other layers.

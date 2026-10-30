@@ -22,6 +22,8 @@ use crate::ui::widgets::{self, status_dot};
 
 const LEFT_PANEL: f32 = 240.;
 pub(super) const RIGHT_PANEL: f32 = 280.;
+/// The "Make with AI" chat, which takes the inspector's place.
+pub(super) const AI_PANEL: f32 = 340.;
 const HEADER: f32 = 56.;
 const SIDEBAR: f32 = 236.;
 const TITLE_BAR: f32 = 34.;
@@ -62,6 +64,7 @@ pub(super) fn layer_icon(layer: &Layer) -> Icon {
         }),
         LayerKind::Image { .. } => Icon::new(gpui_kit::assets::IconName::Image),
         LayerKind::Shape { .. } => Icon::new(IconName::Square),
+        LayerKind::Vector { .. } => Icon::new(gpui_kit::assets::IconName::Sparkles),
     }
 }
 
@@ -86,8 +89,8 @@ fn drop_shadow(s: f32) -> Vec<BoxShadow> {
 }
 
 /// A layer's look at scale `s`, positioned inside its own box. `clip` is
-/// the current frame of a device's screen recording; `words`, how many
-/// words of a text show (see `motion::Shown`).
+/// the current frame of a device's screen recording, or a vector layer's
+/// drawing; `words`, how many words of a text show (see `motion::Shown`).
 fn layer_visual(layer: &Layer, s: f32, folder: &Path, clip: Option<Arc<Image>>, words: Option<f32>) -> AnyElement {
     let (w, h) = (layer.width * s, layer.height * s);
     match &layer.kind {
@@ -245,6 +248,11 @@ fn layer_visual(layer: &Layer, s: f32, folder: &Path, clip: Option<Arc<Image>>, 
                 )
             })
             .into_any_element(),
+        LayerKind::Vector { .. } => div()
+            .w(px(w))
+            .h(px(h))
+            .when_some(clip, |this, drawing| this.child(img(drawing).size_full()))
+            .into_any_element(),
         LayerKind::Shape {
             fill,
             radius,
@@ -282,13 +290,17 @@ fn layer_visual(layer: &Layer, s: f32, folder: &Path, clip: Option<Arc<Image>>, 
 }
 
 impl ScreenshotsView {
+    fn right_width(&self) -> f32 {
+        if self.ai_open { AI_PANEL } else { RIGHT_PANEL }
+    }
+
     /// Fit the canvas to the space between the panels, then apply zoom.
     fn canvas_scale(&self, window: &Window) -> f32 {
         let viewport = window.viewport_size();
         // Room above for the zoom controls and below for the slide numbers
         // and the floating tools.
         let available_h = f32::from(viewport.height) - TITLE_BAR - HEADER - STAGE_TOP - STAGE_BOTTOM - 30.;
-        let panels = if self.left_open { LEFT_PANEL } else { 0. } + if self.right_open { RIGHT_PANEL } else { 0. };
+        let panels = if self.left_open { LEFT_PANEL } else { 0. } + if self.right_open { self.right_width() } else { 0. };
         let available_w = f32::from(viewport.width) - SIDEBAR - panels - 120.;
         let (width, height) = self.target.canvas();
         // Screenshots leave room to glimpse their neighbours; header and
@@ -503,6 +515,8 @@ impl ScreenshotsView {
                 clip_start,
                 ..
             } if is_video(file) => self.clips.get(&folder.join(file), clip_time.unwrap_or(*clip_start)),
+            // Drawn at the screen's pixel density (2×), to stay sharp.
+            LayerKind::Vector { svg } => self.vector_image(svg, layer.width * s * 2., layer.height * s * 2.),
             _ => None,
         };
         div()
@@ -629,7 +643,7 @@ impl ScreenshotsView {
         let (width, height) = self.target.canvas();
         let viewport = window.viewport_size();
         let available_h = f32::from(viewport.height) - TITLE_BAR - HEADER - STAGE_TOP - STAGE_BOTTOM - 30.;
-        let panels = if self.left_open { LEFT_PANEL } else { 0. } + if self.right_open { RIGHT_PANEL } else { 0. };
+        let panels = if self.left_open { LEFT_PANEL } else { 0. } + if self.right_open { self.right_width() } else { 0. };
         let available_w = f32::from(viewport.width) - SIDEBAR - panels - 80.;
         let s = (available_h / height).min(available_w / width).clamp(0.05, 1.);
 
@@ -1336,7 +1350,7 @@ impl Render for ScreenshotsView {
         );
         let right = slide_panel(
             self.right_open,
-            RIGHT_PANEL,
+            self.right_width(),
             self.panel_epoch,
             "right-panel",
             if self.ai_open {

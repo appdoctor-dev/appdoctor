@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 
 use appdoctor_screenshots::{
     Align, BACKGROUND_PRESETS, Background, DEFAULT_FONT, Design, DeviceModel, Drift, Effect, Frame, Layer, LayerKind,
-    SUGGESTED_FONTS, Slide, Sound, SoundEffect, Target, Transition, Video, font_families, has_font, import_image, import_media, motion,
-    parse_color, render_frame, render_png_with, write_atomic,
+    Placement, SUGGESTED_FONTS, Slide, Sound, SoundEffect, Target, Transition, Video, font_families, has_font, import_image, import_media,
+    import_svg, motion, parse_color, render_frame, render_png_with, write_atomic,
 };
 use appdoctor_store::Store;
 use base64::Engine as _;
@@ -187,7 +187,7 @@ fn design_tools() -> Vec<Value> {
             with(
                 design_args(),
                 with(
-                    slide,
+                    slide.clone(),
                     with(
                         json!({ "kind": { "type": "string", "enum": ["text", "device", "image", "shape"] } }),
                         layer_properties(),
@@ -195,6 +195,26 @@ fn design_tools() -> Vec<Value> {
                 ),
             ),
             &["app_id", "slide", "kind"],
+            false,
+        ),
+        tool(
+            "import_svg",
+            "Add a drawing as layers",
+            "Adds an SVG drawing to a slide as separate layers the user can move, resize and edit one by one. Each top-level element becomes its own layer: <text> becomes an editable text layer (font-family, font-size, font-weight, fill, text-anchor), plain <rect> and <circle> become shapes, <image> becomes an image layer, and anything else (<path>, <g>, gradients, filters) becomes a vector layer that stays sharp at any size. So keep each separate thing a separate top-level element (wrap a multi-part icon in one <g>), use <text> for words rather than outlined paths, and put gradients in <defs>. Give the <svg> a viewBox. Draw it in canvas pixels or any units: it's scaled to fit. Returns the new layers bottom to top.",
+            with(
+                design_args(),
+                with(
+                    slide,
+                    json!({
+                        "svg": { "type": "string", "description": "The SVG markup." },
+                        "file": { "type": "string", "description": "Or a path to an .svg file on this computer." },
+                        "x": { "type": "number", "description": "Left edge of the drawing in canvas pixels. Past the canvas width continues onto the next slide." },
+                        "y": { "type": "number", "description": "Top edge in canvas pixels." },
+                        "width": { "type": "number", "description": "Width in canvas pixels; the height follows the drawing's shape. 80% of the canvas, centred, by default." }
+                    }),
+                ),
+            ),
+            &["app_id", "slide"],
             false,
         ),
         tool(
@@ -360,7 +380,7 @@ pub fn call(data_dir: &Path, name: &str, args: &Value) -> Result<Vec<Value>> {
         "export_screenshots" => export(data_dir, &args),
         "export_video" => export_video(data_dir, &args),
         "add_slide" | "delete_slide" | "move_slide" | "set_background" | "add_layer" | "update_layer"
-        | "delete_layer" | "arrange_layer" | "set_video" | "update_slide" | "add_sound" | "remove_sound" => {
+        | "delete_layer" | "arrange_layer" | "set_video" | "update_slide" | "add_sound" | "remove_sound" | "import_svg" => {
             let mut doc = Doc::open(data_dir, &args)?;
             let result = match name {
                 "add_slide" => add_slide(&mut doc, &args),
@@ -368,6 +388,7 @@ pub fn call(data_dir: &Path, name: &str, args: &Value) -> Result<Vec<Value>> {
                 "move_slide" => move_slide(&mut doc, &args),
                 "set_background" => set_background(&mut doc, &args),
                 "add_layer" => add_layer(&mut doc, &args),
+                "import_svg" => import_drawing(&mut doc, &args),
                 "update_layer" => update_layer(&mut doc, &args),
                 "delete_layer" => delete_layer(&mut doc, &args),
                 "set_video" => set_video(&mut doc, &args),
@@ -610,7 +631,7 @@ impl Doc {
                 "background": slide.background,
                 "spin": slide.spin,
                 "camera": slide.camera,
-                "layers": slide.layers,
+                "layers": slide.layers.iter().map(described_layer).collect::<Vec<_>>(),
             })).collect::<Vec<_>>(),
             "note": if self.design.slides.is_empty() {
                 "No slides yet: add_slide starts one."
@@ -619,6 +640,16 @@ impl Doc {
             },
         })
     }
+}
+
+/// A layer for get_design, with a drawing's markup left out: it can be
+/// long, and the layer is moved and resized like any other.
+fn described_layer(layer: &Layer) -> Value {
+    let mut value = serde_json::to_value(layer).unwrap_or(Value::Null);
+    if let LayerKind::Vector { svg } = &layer.kind {
+        value["kind"]["svg"] = json!(format!("(part of an imported drawing, {} characters of SVG)", svg.len()));
+    }
+    value
 }
 
 fn add_slide(doc: &mut Doc, args: &Args) -> Result<Value> {
@@ -722,6 +753,32 @@ fn add_layer(doc: &mut Doc, args: &Args) -> Result<Value> {
     let added = layer.clone();
     doc.slide(index)?.layers.push(layer);
     Ok(json!({ "slide": index, "layer": added, "notes": notes }))
+}
+
+fn import_drawing(doc: &mut Doc, args: &Args) -> Result<Value> {
+    let index = args.index("slide")?;
+    doc.slide(index)?;
+    let svg = match (args.opt_str("svg"), args.opt_str("file")) {
+        (Some(svg), _) => svg.to_owned(),
+        (None, Some(file)) => {
+            let path = local_file(file)?;
+            std::fs::read_to_string(&path).map_err(|error| format!("Couldn't read {}: {error}", path.display()))?
+        }
+        (None, None) => return Err("Give the drawing as svg (the markup) or file (a path).".into()),
+    };
+    let placement = Placement {
+        x: args.opt_f32("x")?,
+        y: args.opt_f32("y")?,
+        width: args.opt_f32("width")?,
+    };
+    let mut next = doc.next_id();
+    let layers = import_svg(&svg, doc.target, placement, &doc.folder, &mut next)?;
+    let added: Vec<Value> = layers
+        .iter()
+        .map(|layer| json!({ "id": layer.id, "name": layer.name, "kind": layer.label(), "x": layer.x, "y": layer.y, "width": layer.width, "height": layer.height }))
+        .collect();
+    doc.slide(index)?.layers.extend(layers);
+    Ok(json!({ "slide": index, "layers": added }))
 }
 
 fn update_layer(doc: &mut Doc, args: &Args) -> Result<Value> {
@@ -893,6 +950,7 @@ fn apply(layer: &mut Layer, args: &Args, folder: &Path, new: bool) -> Result<Vec
                 *shadow = value;
             }
         }
+        LayerKind::Vector { .. } => {}
         LayerKind::Shape {
             fill,
             radius,

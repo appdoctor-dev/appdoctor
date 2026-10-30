@@ -189,6 +189,8 @@ pub struct ScreenshotsView {
     /// The playhead, in seconds.
     time: f32,
     clips: ClipFrames,
+    /// Vector layers drawn for the canvas, by drawing and pixel size.
+    vectors: std::cell::RefCell<std::collections::HashMap<(u64, u32, u32), Arc<Image>>>,
     /// The "Make with AI" panel, shown in place of the inspector.
     ai: Entity<ai::AiPanel>,
     ai_open: bool,
@@ -459,6 +461,7 @@ impl ScreenshotsView {
             playing: false,
             time: 0.,
             clips: clip_frames,
+            vectors: Default::default(),
             ai,
             ai_open: false,
             _ticker: None,
@@ -820,6 +823,7 @@ impl ScreenshotsView {
                     self.models
                         .update(cx, |select, cx| select.set_selected_value(&slug, window, cx));
                 }
+                LayerKind::Vector { .. } => {}
             }
         }
         if let Some(scene) = self.current().map(|slide| slide.duration) {
@@ -966,17 +970,104 @@ impl ScreenshotsView {
         .detach();
     }
 
-    fn add_image(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.pick_image(window, cx, |this, name, (w, h), window, cx| {
-            // Fit into 60% of the canvas width, keeping the image's shape.
-            let width = (this.target.canvas().0 * 0.6).min(w.max(1.));
-            let height = width * h / w.max(1.);
-            let id = this.mint_id();
-            this.add_layer(Layer::image(this.target, id, name, width, height), window, cx);
-        });
+    /// A vector layer's drawing at about `width` × `height` pixels, cached.
+    fn vector_image(&self, svg: &str, width: f32, height: f32) -> Option<Arc<Image>> {
+        use std::hash::{Hash, Hasher};
+        // Round up to 16 px steps, so resizing doesn't redraw every frame.
+        let step = |v: f32| ((v.max(1.) / 16.).ceil() * 16.) as u32;
+        let (w, h) = (step(width), step(height));
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        svg.hash(&mut hasher);
+        let key = (hasher.finish(), w, h);
+        if let Some(image) = self.vectors.borrow().get(&key) {
+            return Some(image.clone());
+        }
+        let png = appdoctor_screenshots::rasterize_svg(svg, w, h)?;
+        let image = Arc::new(Image::from_bytes(ImageFormat::Png, png));
+        let mut vectors = self.vectors.borrow_mut();
+        if vectors.len() > 200 {
+            vectors.clear();
+        }
+        vectors.insert(key, image.clone());
+        Some(image)
     }
 
-    /// Sets the selected device's (or the slide's first device's) screenshot.
+    /// Adds an SVG drawing, split into layers.
+    fn import_drawing(&mut self, source: &Path, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(folder) = self.folder(cx) else {
+            return;
+        };
+        let imported = std::fs::read_to_string(source)
+            .map_err(|error| error.to_string())
+            .and_then(|svg| {
+                let mut next = self.next_id;
+                appdoctor_screenshots::import_svg(&svg, self.target, Default::default(), &folder, &mut next)
+                    .map(|layers| (layers, next))
+            });
+        match imported {
+            Ok((layers, next)) => {
+                self.next_id = next;
+                let count = layers.len();
+                let top = layers.last().map(|layer| layer.id);
+                self.apply(window, cx, |this| {
+                    if let Some(slide) = this.current_mut() {
+                        slide.layers.extend(layers);
+                    }
+                });
+                self.select(top, window, cx);
+                self.status = Some(Ok(format!("Added the drawing as {count} layers.")));
+            }
+            Err(error) => self.status = Some(Err(format!("Couldn't use that drawing: {error}"))),
+        }
+        cx.notify();
+    }
+
+    fn add_image(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // SVG drawings come in as layers; pictures as one image layer.
+        let paths = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some("Use Image".into()),
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let Ok(Ok(Some(paths))) = paths.await else {
+                return;
+            };
+            let Some(source) = paths.into_iter().next() else {
+                return;
+            };
+            this.update_in(cx, |this, window, cx| {
+                if source.extension().is_some_and(|e| e.eq_ignore_ascii_case("svg")) {
+                    this.import_drawing(&source, window, cx);
+                } else {
+                    this.add_picture(source, window, cx);
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn add_picture(&mut self, source: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(folder) = self.folder(cx) else {
+            return;
+        };
+        match import_image(&source, &folder) {
+            Ok((name, (w, h))) => {
+                // Fit into 60% of the canvas width, keeping the image's shape.
+                let width = (self.target.canvas().0 * 0.6).min(w.max(1.));
+                let height = width * h / w.max(1.);
+                let id = self.mint_id();
+                self.add_layer(Layer::image(self.target, id, name, width, height), window, cx);
+            }
+            Err(error) => {
+                self.status = Some(Err(format!("Couldn't use that image: {error}")));
+                cx.notify();
+            }
+        }
+    }
+
     /// Sets the selected device's (or the slide's first device's) screen:
     /// a screenshot, or a screen recording that plays in videos.
     fn choose_screenshot(&mut self, window: &mut Window, cx: &mut Context<Self>) {

@@ -322,6 +322,7 @@ version = "0.1.0"
 name = "appdoctor-screenshots"
 version = "0.1.0"
 dependencies = [
+ "base64 0.23.1",
  "imagesize 0.14.0",
  "resvg 0.46.0",
  "serde",

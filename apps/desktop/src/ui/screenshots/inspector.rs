@@ -58,6 +58,7 @@ fn kind_name(layer: &Layer) -> &'static str {
         LayerKind::Device { model, .. } => model.label(),
         LayerKind::Image { .. } => "Image",
         LayerKind::Shape { .. } => "Shape",
+        LayerKind::Vector { .. } => "Drawing",
     }
 }
 
@@ -431,6 +432,21 @@ impl ScreenshotsView {
                         ))
                         .child(separator(cx))
                         .child(row("Shadow", shadow_switch(*shadow, cx), cx)),
+                )
+                .into_any_element(),
+            LayerKind::Vector { .. } => v_flex()
+                .child(heading("Drawing", cx))
+                .child(
+                    group(cx).child(
+                        div()
+                            .p(px(10.))
+                            .text_size(px(12.))
+                            .text_color(theme.muted_foreground)
+                            .child(
+                                "Part of an imported drawing. Move and resize it like any layer; it stays sharp at any \
+                                 size. To change its details, ask the AI to redraw it, or import a new SVG.",
+                            ),
+                    ),
                 )
                 .into_any_element(),
             LayerKind::Shape { radius, fill, .. } => v_flex()

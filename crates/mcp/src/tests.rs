@@ -199,6 +199,30 @@ fn designs_header_and_search_art() {
 }
 
 #[test]
+fn imports_a_drawing_as_layers() {
+    let dir = data_dir("drawing");
+    let server = Server::new(dir.clone());
+    call_json(&server, "add_slide", json!({ "app_id": APP }));
+    let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">
+        <defs><linearGradient id="g"><stop offset="0" stop-color="#f0a"/><stop offset="1" stop-color="#0af"/></linearGradient></defs>
+        <rect x="20" y="20" width="360" height="260" rx="30" fill="#1b1340"/>
+        <path d="M60 220 Q200 40 340 220" stroke="url(#g)" stroke-width="18" fill="none"/>
+        <text x="200" y="150" font-size="40" font-weight="700" fill="#ffffff" text-anchor="middle">Calm</text>
+    </svg>"##;
+    let added = call_json(&server, "import_svg", json!({ "app_id": APP, "slide": 0, "svg": svg, "x": 100, "width": 800 }));
+    let kinds: Vec<&str> = added["layers"].as_array().unwrap().iter().map(|l| l["kind"].as_str().unwrap()).collect();
+    assert_eq!(kinds, ["Shape", "Vector", "Text"]);
+    assert_eq!(added["layers"][0]["x"], 140.0);
+    let design = call_json(&server, "get_design", json!({ "app_id": APP }));
+    let layers = design["slides"][0]["layers"].as_array().unwrap();
+    assert!(layers[1]["kind"]["svg"].as_str().unwrap().starts_with("(part of an imported drawing"));
+    let saved = Design::load_for(&dir.join("screenshots").join(APP.to_string()), Target::Iphone);
+    assert!(matches!(&saved.slides[0].layers[1].kind, LayerKind::Vector { svg } if svg.contains("linearGradient")));
+    let (content, failed) = call(&server, "import_svg", json!({ "app_id": APP, "slide": 0, "svg": "<p>hi</p>" }));
+    assert!(failed && content[0]["text"].as_str().unwrap().contains("SVG"));
+}
+
+#[test]
 fn explains_mistakes() {
     let server = Server::new(data_dir("mistakes"));
     let (content, failed) = call(&server, "get_design", json!({ "app_id": 42 }));
