@@ -104,6 +104,7 @@ fn design_round_trips_and_upgrades_the_first_format() {
     let design = Design {
         version: 2,
         target: Target::Iphone,
+        video: None,
         slides: vec![starter(), starter()],
     };
     design.save(&path).unwrap();
@@ -244,6 +245,7 @@ fn designs_keep_their_target() {
     let design = Design {
         version: 2,
         target: Target::Ipad,
+        video: None,
         slides: vec![Slide::starter(Target::Ipad, "Big", &mut id)],
     };
     design.save(&dir.join(Target::Ipad.file_name())).unwrap();

@@ -28,6 +28,7 @@ appdoctor-secrets = { path = "crates/secrets" }
 appdoctor-jwt = { path = "crates/jwt" }
 appdoctor-screenshots = { path = "crates/screenshots" }
 appdoctor-mcp = { path = "crates/mcp" }
+appdoctor-video = { path = "crates/video" }
 
 # gpui-kit pins the exact gpui-pre snapshot it was released against and
 # re-exports gpui, gpui-base and gpui-component, so it is the only UI dep.

@@ -16,16 +16,20 @@
 mod device;
 pub mod edit;
 mod legacy;
+pub mod motion;
+mod render;
 mod svg;
 mod text;
 
 use std::path::Path;
 
-use resvg::tiny_skia;
+pub use resvg::tiny_skia;
 use resvg::usvg;
 use serde::{Deserialize, Serialize};
 
 pub use device::{DeviceGeometry, DeviceModel, Frame, device_geometry};
+pub use motion::{Drift, Effect, Motion, Transition, Video};
+pub use render::{ClipSource, NoClips, render_frame, render_png, render_png_with, render_slide};
 pub use svg::to_svg;
 pub use text::{DEFAULT_FONT, SUGGESTED_FONTS, Style, font_families, has_font, warm_fonts, wrap, wrap_styled};
 
@@ -125,6 +129,17 @@ impl Target {
         DeviceModel::from_slug(slug).expect("the default models are in the catalog")
     }
 
+    /// The size its video exports at: Apple's app preview sizes for iPhone
+    /// and iPad, the header's own, and the smallest search size.
+    pub fn video_size(self) -> CanvasSize {
+        match self {
+            Target::Iphone => CanvasSize::PreviewIphone,
+            Target::Ipad => CanvasSize::PreviewIpad,
+            Target::Header => CanvasSize::Header,
+            Target::Search => CanvasSize::SearchSmall,
+        }
+    }
+
     /// Screenshots sit side by side in the App Store; header and search art
     /// stand alone, so each of their slides is an alternative.
     pub fn is_screenshot(self) -> bool {
@@ -170,10 +185,14 @@ pub enum CanvasSize {
     /// (1920 × 1280) Apple takes.
     Search,
     SearchSmall,
+    /// App preview video, iPhone (every Face ID size takes 886 × 1920).
+    PreviewIphone,
+    /// App preview video, iPad, 1200 × 1600.
+    PreviewIpad,
 }
 
 impl CanvasSize {
-    pub const ALL: [CanvasSize; 7] = [
+    pub const ALL: [CanvasSize; 9] = [
         CanvasSize::Iphone69,
         CanvasSize::Iphone65,
         CanvasSize::Ipad13,
@@ -181,6 +200,8 @@ impl CanvasSize {
         CanvasSize::Header,
         CanvasSize::Search,
         CanvasSize::SearchSmall,
+        CanvasSize::PreviewIphone,
+        CanvasSize::PreviewIpad,
     ];
 
     pub fn pixels(self) -> (u32, u32) {
@@ -192,13 +213,15 @@ impl CanvasSize {
             CanvasSize::Header => (3840, 1646),
             CanvasSize::Search => (3840, 2560),
             CanvasSize::SearchSmall => (1920, 1280),
+            CanvasSize::PreviewIphone => (886, 1920),
+            CanvasSize::PreviewIpad => (1200, 1600),
         }
     }
 
     pub fn target(self) -> Target {
         match self {
-            CanvasSize::Iphone69 | CanvasSize::Iphone65 => Target::Iphone,
-            CanvasSize::Ipad13 | CanvasSize::Ipad129 => Target::Ipad,
+            CanvasSize::Iphone69 | CanvasSize::Iphone65 | CanvasSize::PreviewIphone => Target::Iphone,
+            CanvasSize::Ipad13 | CanvasSize::Ipad129 | CanvasSize::PreviewIpad => Target::Ipad,
             CanvasSize::Header => Target::Header,
             CanvasSize::Search | CanvasSize::SearchSmall => Target::Search,
         }
@@ -213,6 +236,8 @@ impl CanvasSize {
             CanvasSize::Header => "Header 21:9",
             CanvasSize::Search => "Search 3:2",
             CanvasSize::SearchSmall => "Search 3:2, small",
+            CanvasSize::PreviewIphone => "iPhone app preview",
+            CanvasSize::PreviewIpad => "iPad app preview",
         }
     }
 
@@ -225,6 +250,8 @@ impl CanvasSize {
             CanvasSize::Header => "header-21x9",
             CanvasSize::Search => "search-3x2",
             CanvasSize::SearchSmall => "search-3x2-small",
+            CanvasSize::PreviewIphone => "app-preview-iphone",
+            CanvasSize::PreviewIpad => "app-preview-ipad",
         }
     }
 }
@@ -233,6 +260,9 @@ impl CanvasSize {
 pub struct Design {
     pub version: u32,
     pub target: Target,
+    /// Set when the design is also a video: its slides play as scenes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub video: Option<Video>,
     pub slides: Vec<Slide>,
 }
 
@@ -241,6 +271,7 @@ impl Default for Design {
         Self {
             version: 2,
             target: Target::Iphone,
+            video: None,
             slides: Vec::new(),
         }
     }
@@ -251,6 +282,17 @@ pub struct Slide {
     pub background: Background,
     /// Bottom to top.
     pub layers: Vec<Layer>,
+    /// Seconds the slide shows as a scene, when the design is a video.
+    #[serde(default = "default_scene", skip_serializing_if = "is_default_scene")]
+    pub duration: f32,
+}
+
+fn default_scene() -> f32 {
+    motion::DEFAULT_SCENE
+}
+
+fn is_default_scene(duration: &f32) -> bool {
+    *duration == motion::DEFAULT_SCENE
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -281,11 +323,24 @@ pub struct Layer {
     pub hidden: bool,
     #[serde(default)]
     pub locked: bool,
+    /// When it enters, leaves and drifts, in a video.
+    #[serde(default, skip_serializing_if = "Motion::is_still")]
+    pub motion: Motion,
     pub kind: LayerKind,
 }
 
 fn one() -> f32 {
     1.
+}
+
+fn is_zero(value: &f32) -> bool {
+    *value == 0.
+}
+
+/// Whether a file is a video (a screen recording) rather than an image.
+pub fn is_video(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    [".mov", ".mp4", ".m4v"].iter().any(|ext| lower.ends_with(ext))
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -307,9 +362,13 @@ pub enum LayerKind {
         #[serde(default)]
         model: DeviceModel,
         frame: Frame,
-        /// File name inside the design's folder.
+        /// File name inside the design's folder: an image, or a screen
+        /// recording (.mov, .mp4, .m4v) that plays in videos.
         screenshot: Option<String>,
         shadow: bool,
+        /// Seconds into the screen recording that it starts playing.
+        #[serde(default, skip_serializing_if = "is_zero")]
+        clip_start: f32,
     },
     Image {
         file: Option<String>,
@@ -383,6 +442,7 @@ impl Layer {
             opacity: 1.,
             hidden: false,
             locked: false,
+            motion: Motion::default(),
             kind: LayerKind::Text {
                 text: text.into(),
                 size,
@@ -418,11 +478,13 @@ impl Layer {
             opacity: 1.,
             hidden: false,
             locked: false,
+            motion: Motion::default(),
             kind: LayerKind::Device {
                 model,
                 frame: Frame::Black,
                 screenshot: None,
                 shadow: true,
+                clip_start: 0.,
             },
         }
     }
@@ -439,6 +501,7 @@ impl Layer {
             opacity: 1.,
             hidden: false,
             locked: false,
+            motion: Motion::default(),
             kind: LayerKind::Image {
                 file: Some(file),
                 radius: 36.,
@@ -460,6 +523,7 @@ impl Layer {
             opacity: 1.,
             hidden: false,
             locked: false,
+            motion: Motion::default(),
             kind: LayerKind::Shape {
                 fill: "#ffffff".into(),
                 radius: 48.,
@@ -495,6 +559,7 @@ impl Slide {
                         Layer::text(target, id(), "One line on why it matters", sub_y, sub_size, 400, "#e0e7ff"),
                         Layer::device(target, id(), device_y),
                     ],
+                    duration: motion::DEFAULT_SCENE,
                 }
             }
             // Wide: the words on the left, a phone on the right, all inside
@@ -516,6 +581,7 @@ impl Slide {
                 Slide {
                     background: gradient,
                     layers: vec![title, sub, device],
+                    duration: motion::DEFAULT_SCENE,
                 }
             }
             Target::Search => {
@@ -524,6 +590,7 @@ impl Slide {
                 Slide {
                     background: gradient,
                     layers: vec![title, device],
+                    duration: motion::DEFAULT_SCENE,
                 }
             }
         }
@@ -608,6 +675,24 @@ pub fn import_image(source: &Path, folder: &Path) -> std::io::Result<(String, (f
     Ok((name, (size.width as f32, size.height as f32)))
 }
 
+/// Copies an image or a screen recording into a design's folder under a
+/// fresh name; returns the name.
+pub fn import_media(source: &Path, folder: &Path) -> std::io::Result<String> {
+    let name = source.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    if !is_video(&name) {
+        return import_image(source, folder).map(|(name, _)| name);
+    }
+    let extension = source
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_else(|| "mov".into());
+    std::fs::create_dir_all(folder)?;
+    let name = format!("clip-{}.{extension}", uuid::Uuid::new_v4().simple());
+    std::fs::copy(source, folder.join(&name))?;
+    Ok(name)
+}
+
 /// `#rrggbb`/`#rgb` parsed to RGB, for the canvas.
 pub fn parse_color(color: &str) -> Option<(u8, u8, u8)> {
     let hex = color.trim().trim_start_matches('#');
@@ -648,28 +733,6 @@ pub fn visible_layers(slides: &[Slide], index: usize, width: f32) -> Vec<(usize,
         }
     }
     layers
-}
-
-/// Renders slide `index` to PNG bytes at `scale` × `size` (1.0 for export,
-/// smaller for thumbnails), including layers spanning in from its
-/// neighbours. The slides are laid out on `size`'s target canvas.
-/// `images_dir` holds the design's images.
-pub fn render_png(slides: &[Slide], index: usize, size: CanvasSize, images_dir: &Path, scale: f32) -> Result<Vec<u8>> {
-    let options = usvg::Options {
-        resources_dir: Some(images_dir.to_path_buf()),
-        fontdb: text::fonts(),
-        ..Default::default()
-    };
-    let tree = usvg::Tree::from_str(&to_svg(slides, index, size), &options)?;
-    let (w, h) = size.pixels();
-    let (pw, ph) = (((w as f32) * scale).round() as u32, ((h as f32) * scale).round() as u32);
-    let mut pixmap = tiny_skia::Pixmap::new(pw.max(1), ph.max(1)).ok_or(Error::Canvas(pw, ph))?;
-    resvg::render(
-        &tree,
-        tiny_skia::Transform::from_scale(scale, scale),
-        &mut pixmap.as_mut(),
-    );
-    pixmap.encode_png().map_err(|error| Error::Png(error.to_string()))
 }
 
 #[cfg(test)]

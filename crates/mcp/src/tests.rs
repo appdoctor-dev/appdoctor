@@ -217,3 +217,57 @@ fn explains_mistakes() {
     let (_, failed) = call(&server, "no_such_tool", json!({}));
     assert!(failed);
 }
+
+#[cfg(target_os = "macos")]
+#[test]
+fn makes_a_video_with_a_screen_recording() {
+    use appdoctor_screenshots::tiny_skia::{Color, Pixmap};
+
+    let dir = data_dir("video");
+    let server = Server::new(dir.clone());
+    // A one-second "screen recording": solid green.
+    let clip = dir.join("screen.mp4");
+    let mut encoder = appdoctor_video::Encoder::create(&clip, 200, 432, 30, 1_000_000).unwrap();
+    for index in 0..30 {
+        let mut frame = Pixmap::new(200, 432).unwrap();
+        frame.fill(Color::from_rgba8(0, 200, 0, 255));
+        encoder.push(&frame, index).unwrap();
+    }
+    encoder.finish().unwrap();
+
+    call_json(&server, "add_slide", json!({ "app_id": APP, "device": "search", "starter": true }));
+    call_json(&server, "add_slide", json!({ "app_id": APP, "device": "search", "starter": true }));
+    let video = call_json(&server, "set_video", json!({ "app_id": APP, "device": "search", "enabled": true, "fps": 10 }));
+    assert!(video["length_problem"].is_null(), "6 s is fine for search");
+    call_json(&server, "update_slide", json!({ "app_id": APP, "device": "search", "slide": 1, "duration": 2 }));
+    let design = call_json(&server, "get_design", json!({ "app_id": APP, "device": "search" }));
+    assert_eq!(design["video"]["length"], 5.0);
+    let layers = design["slides"][0]["layers"].as_array().unwrap();
+    let title = layers[0]["id"].as_u64().unwrap();
+    let device = layers[1]["id"].as_u64().unwrap();
+    call_json(
+        &server,
+        "update_layer",
+        json!({ "app_id": APP, "device": "search", "layer_id": title, "enter": "rise", "comes_in_at": 0.5, "drift": "zoom-in" }),
+    );
+    call_json(
+        &server,
+        "update_layer",
+        json!({ "app_id": APP, "device": "search", "layer_id": device, "screenshot": clip.display().to_string(), "enter": "slide" }),
+    );
+
+    let (content, failed) = call(&server, "render_frame", json!({ "app_id": APP, "device": "search", "time": 2.8, "scale": 0.1 }));
+    assert!(!failed, "{content:?}");
+    assert_eq!(content[0]["type"], "image");
+    assert!(content[1]["text"].as_str().unwrap().contains("transition"));
+
+    let exported = call_json(
+        &server,
+        "export_video",
+        json!({ "app_id": APP, "device": "search", "folder": dir.join("out").display().to_string() }),
+    );
+    let written = exported["written"].as_str().unwrap();
+    assert!(written.ends_with("search-3x2-small.mp4"));
+    let length = appdoctor_video::clip_duration(std::path::Path::new(written)).unwrap();
+    assert!((length - 5.).abs() < 0.2, "{length}");
+}

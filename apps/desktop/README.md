@@ -46,6 +46,7 @@ crates/store            SQLite (WAL) + migrations: apps, keywords, rank snapshot
 crates/scoring          keyword difficulty from the top 10, candidate keywords from metadata (opt-level 3)
 crates/screenshots      screenshot designs: model, device frames, font measuring, SVG layout, PNG render via resvg (opt-level 3)
 crates/mcp              `appdoctor mcp`: local stdio MCP server for the user's own AI agent, and one-click setup of AI apps
+crates/video            AVFoundation on macOS: decodes screen recordings, encodes H.264 MP4 (app previews, header and search videos)
 crates/jwt              ES256 signing and P-256 key handling for both Apple APIs
 crates/asc              App Store Connect: localizations, builds, build upload, App Review submissions (confirm-gated)
 crates/apple-ads        Apple Ads Platform API 1.0: client secret, token, ACLs, popularity, suggestions
@@ -89,12 +90,20 @@ the open-source app-store-scraper.
 
 **MCP server** (`crates/mcp`). `appdoctor mcp` runs the same binary as a
 JSON-RPC server on stdin and stdout, with no window and no network. Today it
-has 14 screenshot design tools:
+has 18 design tools:
 - reading: `list_apps`, `get_design`, `design_options`, `list_fonts`;
 - editing: `add_slide`, `delete_slide`, `move_slide`, `set_background`,
   `add_layer`, `update_layer`, `delete_layer`, `arrange_layer`;
-- output: `render_slide`, which returns a PNG the agent can look at, and
-  `export_screenshots`.
+- video: `set_video`, `update_slide` (scene length), and motion properties
+  on `add_layer` and `update_layer` (enter, exit, comes_in_at, leaves_at,
+  drift, clip_start);
+- output: `render_slide` and `render_frame` (any moment of the video), which
+  return PNGs the agent can look at, then `export_screenshots` and
+  `export_video`.
+
+The server's instructions point agents at the iOS Simulator for footage:
+build the app, run it, record it with `xcrun simctl io booted recordVideo`,
+and set the recording as a device's screen.
 
 Each call reads the design file, changes it and writes it back atomically.
 The editor checks the file every 0.7 s. It takes in changes it didn't write
@@ -173,8 +182,8 @@ Every section in the sidebar is a page of this one window.
       numbers).
     - Their slides are alternative versions rather than a set, so nothing
       spans between them.
-    - Apple also takes 5–30 s looping videos in these slots; making video
-      isn't built yet.
+    - Apple also takes 5–30 s looping videos in these slots; see Video
+      below.
   - The screenshots sit edge to edge on one stage, as the export cuts them,
     with a hairline at each cut. Each has a background (gradient presets, or
     your own gradient or solid colour) and a stack of layers: text, device,
@@ -215,6 +224,32 @@ Every section in the sidebar is a page of this one window.
     `<data folder>/screenshots/<app id>/design.json` (iPad:
     `design-ipad.json`). Designs from the first version, with one headline,
     subheadline and device per slide, are upgraded on load.
+  - **Video.** Any design can be a video: turn on *Make a video* in the
+    inspector (with nothing selected).
+    - Its slides become scenes (3 s each, adjustable), joined by a push, fade
+      or cut. A push slides the next scene in, so a layer spanning two
+      scenes stays joined as it moves.
+    - Each layer gets *Motion*: an enter and an exit effect (fade, rise,
+      slide, zoom, pop), when it comes in and leaves, and a slow drift.
+    - A device's screen can be a screen recording (.mov, .mp4, .m4v), which
+      plays in the video and shows its first frame in stills.
+    - *Preview* plays it in the editor, with a scrubber; Space plays and
+      pauses.
+    - *Export video* writes an H.264 MP4 at Apple's size:
+      - iPhone app preview: 886×1920;
+      - iPad app preview: 1200×1600;
+      - header: 3840×1646;
+      - search: 1920×1280.
+
+      The inspector warns when the length falls outside Apple's limits
+      (15–30 s for app previews, 5–30 s otherwise).
+    - Frames render on every core through the same pieces as stills; screen
+      recordings are composited between SVG passes. A 9 s iPhone preview
+      exports in about 9 s, a 4K-wide header at about 3 s per second of
+      video.
+    - Not done yet: a silent audio track (Apple's spec doesn't say previews
+      need one), per-layer keyframes beyond the effects, and Windows
+      (`appdoctor-video` reports it unsupported there).
   - *AI agent* connects your own AI app; see "MCP server" above. Its edits
     show up live and undo with ⌘Z.
   - Checked by hand with demo data:

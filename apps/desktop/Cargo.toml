@@ -26,6 +26,7 @@ appdoctor-scoring.workspace = true
 appdoctor-screenshots.workspace = true
 appdoctor-secrets.workspace = true
 appdoctor-store.workspace = true
+appdoctor-video.workspace = true
 anyhow.workspace = true
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
 dirs.workspace = true

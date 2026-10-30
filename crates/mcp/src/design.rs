@@ -5,8 +5,9 @@
 use std::path::{Path, PathBuf};
 
 use appdoctor_screenshots::{
-    Align, BACKGROUND_PRESETS, Background, DEFAULT_FONT, Design, DeviceModel, Frame, Layer, LayerKind, SUGGESTED_FONTS,
-    Slide, Target, font_families, has_font, import_image, parse_color, render_png, write_atomic,
+    Align, BACKGROUND_PRESETS, Background, DEFAULT_FONT, Design, DeviceModel, Drift, Effect, Frame, Layer, LayerKind,
+    SUGGESTED_FONTS, Slide, Target, Transition, Video, font_families, has_font, import_image, import_media, motion,
+    parse_color, render_frame, render_png_with, write_atomic,
 };
 use appdoctor_store::Store;
 use base64::Engine as _;
@@ -46,11 +47,18 @@ fn layer_properties() -> Value {
         "italic": { "type": "boolean" },
         "model": { "type": "string", "enum": DeviceModel::all().map(|m| m.slug()).collect::<Vec<_>>(), "description": "Device layers: which iPhone or iPad, e.g. iphone-18-pro-max, iphone-air, iphone-se, ipad-pro-13. design_options lists them all." },
         "frame": { "type": "string", "enum": Frame::ALL.iter().map(|f| f.slug()).collect::<Vec<_>>(), "description": "Device layers: the finish, or none for just the rounded screen." },
-        "screenshot": { "type": "string", "description": "Device layers: path to a PNG or JPEG of the app's screen on this computer. It's copied into the design." },
+        "screenshot": { "type": "string", "description": "Device layers: path to the app's screen on this computer: a PNG or JPEG, or a screen recording (.mov, .mp4, .m4v) that plays in videos. It's copied into the design. Record the iOS Simulator with `xcrun simctl io booted recordVideo --codec h264 screen.mov` (Ctrl-C stops it)." },
         "image": { "type": "string", "description": "Image layers: path to a PNG, JPEG or WebP on this computer. It's copied into the design." },
         "shadow": { "type": "boolean", "description": "Devices and images: a soft drop shadow." },
         "radius": { "type": "number", "description": "Images and shapes: corner radius in canvas pixels." },
-        "fill": { "type": "string", "description": "Shape layers: fill colour, #rrggbb." }
+        "fill": { "type": "string", "description": "Shape layers: fill colour, #rrggbb." },
+        "enter": { "type": "string", "enum": Effect::ALL.iter().map(|e| e.slug()).collect::<Vec<_>>(), "description": "Videos: how the layer comes in." },
+        "exit": { "type": "string", "enum": Effect::ALL.iter().map(|e| e.slug()).collect::<Vec<_>>(), "description": "Videos: how it goes out." },
+        "comes_in_at": { "type": "number", "minimum": 0, "description": "Videos: seconds into its scene that it comes in." },
+        "leaves_at": { "type": ["number", "null"], "minimum": 0, "description": "Videos: seconds into its scene that it starts to leave; null stays to the end." },
+        "effect_length": { "type": "number", "minimum": 0.05, "description": "Videos: seconds each effect takes; 0.6 by default." },
+        "drift": { "type": "string", "enum": Drift::ALL.iter().map(|d| d.slug()).collect::<Vec<_>>(), "description": "Videos: a slow move over the scene, so stills feel alive." },
+        "clip_start": { "type": "number", "minimum": 0, "description": "Videos: seconds into the device's screen recording that it starts playing." }
     })
 }
 
@@ -227,6 +235,61 @@ pub fn tools() -> Vec<Value> {
             true,
         ),
         tool(
+            "set_video",
+            "Make a design a video",
+            "Turns a design into a video, or back into stills. Its slides become scenes played in order (3 s each unless set with update_slide), joined by a transition: push (the next scene slides in, and layers spanning the two stay joined), fade or cut. Layers animate with the motion properties of add_layer and update_layer. iPhone and iPad designs export App Store app previews (15–30 s, 886 x 1920 or 1200 x 1600); header and search designs export looping 5–30 s videos.",
+            with(
+                design_args(),
+                json!({
+                    "enabled": { "type": "boolean" },
+                    "transition": { "type": "string", "enum": Transition::ALL.iter().map(|t| t.slug()).collect::<Vec<_>>() },
+                    "transition_length": { "type": "number", "minimum": 0, "description": "Seconds; 0.5 by default." },
+                    "fps": { "type": "integer", "enum": [24, 30, 60], "description": "30 by default; app previews allow at most 30." }
+                }),
+            ),
+            &["app_id", "enabled"],
+            false,
+        ),
+        tool(
+            "update_slide",
+            "Change a slide",
+            "Sets how long a slide shows as a scene in the video, in seconds.",
+            with(
+                design_args(),
+                json!({
+                    "slide": { "type": "integer", "minimum": 0 },
+                    "duration": { "type": "number", "minimum": 0.5, "maximum": 30 }
+                }),
+            ),
+            &["app_id", "slide", "duration"],
+            false,
+        ),
+        tool(
+            "render_frame",
+            "Look at a moment of the video",
+            "Renders the video `time` seconds in to a PNG you can see, exactly as it exports, with layers moved by their motion and screen recordings at that moment.",
+            with(
+                design_args(),
+                json!({
+                    "time": { "type": "number", "minimum": 0 },
+                    "scale": { "type": "number", "minimum": 0.1, "maximum": 0.5, "description": "Of the video size; 0.3 by default." }
+                }),
+            ),
+            &["app_id", "time"],
+            true,
+        ),
+        tool(
+            "export_video",
+            "Export the video",
+            "Writes the design's video as an H.264 MP4 at Apple's size into a folder (macOS). Takes about the video's length for app previews, a few times it for the 4K-wide header.",
+            with(
+                design_args(),
+                json!({ "folder": { "type": "string", "description": "Folder to write into; created if missing." } }),
+            ),
+            &["app_id", "folder"],
+            false,
+        ),
+        tool(
             "export_screenshots",
             "Export screenshots",
             "Writes every slide as PNGs at the App Store sizes (iPhone 6.9\" and 6.5\", or iPad 13\" and 12.9\") into a folder.",
@@ -251,9 +314,11 @@ pub fn call(data_dir: &Path, name: &str, args: &Value) -> Result<Vec<Value>> {
             Ok(text(doc.describe()))
         }
         "render_slide" => render_slide(data_dir, &args),
+        "render_frame" => render_moment(data_dir, &args),
         "export_screenshots" => export(data_dir, &args),
+        "export_video" => export_video(data_dir, &args),
         "add_slide" | "delete_slide" | "move_slide" | "set_background" | "add_layer" | "update_layer"
-        | "delete_layer" | "arrange_layer" => {
+        | "delete_layer" | "arrange_layer" | "set_video" | "update_slide" => {
             let mut doc = Doc::open(data_dir, &args)?;
             let result = match name {
                 "add_slide" => add_slide(&mut doc, &args),
@@ -263,6 +328,8 @@ pub fn call(data_dir: &Path, name: &str, args: &Value) -> Result<Vec<Value>> {
                 "add_layer" => add_layer(&mut doc, &args),
                 "update_layer" => update_layer(&mut doc, &args),
                 "delete_layer" => delete_layer(&mut doc, &args),
+                "set_video" => set_video(&mut doc, &args),
+                "update_slide" => update_slide(&mut doc, &args),
                 _ => arrange_layer(&mut doc, &args),
             }?;
             doc.save()?;
@@ -482,8 +549,18 @@ impl Doc {
             "device": self.target.slug(),
             "canvas": { "width": width, "height": height },
             "exports": self.target.sizes().iter().map(|s| s.label()).collect::<Vec<_>>(),
+            "video": self.design.video.as_ref().map(|video| json!({
+                "transition": video.transition.slug(),
+                "transition_length": video.transition_length,
+                "fps": video.fps,
+                "length": motion::duration(&self.design.slides),
+                "size": self.target.video_size().pixels(),
+                "length_problem": appdoctor_video::length_problem(&self.design),
+            })),
             "slides": self.design.slides.iter().enumerate().map(|(index, slide)| json!({
                 "slide": index,
+                "duration": slide.duration,
+                "starts_at": motion::scene_start(&self.design.slides, index),
                 "background": slide.background,
                 "layers": slide.layers,
             })).collect::<Vec<_>>(),
@@ -509,6 +586,7 @@ fn add_slide(doc: &mut Doc, args: &Args) -> Result<Value> {
         Slide::starter(doc.target, args.opt_str("headline").unwrap_or("Your headline here"), &mut next)
     } else {
         Slide {
+            duration: appdoctor_screenshots::motion::DEFAULT_SCENE,
             background: doc
                 .design
                 .slides
@@ -627,7 +705,8 @@ fn arrange_layer(doc: &mut Doc, args: &Args) -> Result<Value> {
     Ok(json!({ "slide": s, "order": layers.iter().map(|l| l.id).collect::<Vec<_>>() }))
 }
 
-fn import(path: &str, folder: &Path) -> Result<(String, (f32, f32))> {
+/// A file path from the agent, with `~/` expanded, that exists.
+fn local_file(path: &str) -> Result<PathBuf> {
     let path = match path.strip_prefix("~/") {
         Some(rest) => std::env::var_os("HOME")
             .map(|home| PathBuf::from(home).join(rest))
@@ -637,7 +716,18 @@ fn import(path: &str, folder: &Path) -> Result<(String, (f32, f32))> {
     if !path.is_file() {
         return Err(format!("There's no file at {}.", path.display()));
     }
+    Ok(path)
+}
+
+fn import(path: &str, folder: &Path) -> Result<(String, (f32, f32))> {
+    let path = local_file(path)?;
     import_image(&path, folder).map_err(|error| format!("Couldn't use {}: {error}", path.display()))
+}
+
+/// An image or a screen recording, for a device's screen.
+fn import_screen(path: &str, folder: &Path) -> Result<String> {
+    let path = local_file(path)?;
+    import_media(&path, folder).map_err(|error| format!("Couldn't use {}: {error}", path.display()))
 }
 
 /// Sets the properties `args` gives. Returns notes for the agent (a font
@@ -708,7 +798,11 @@ fn apply(layer: &mut Layer, args: &Args, folder: &Path, new: bool) -> Result<Vec
             frame,
             screenshot,
             shadow,
+            clip_start,
         } => {
+            if let Some(value) = args.opt_f32("clip_start")? {
+                *clip_start = value.max(0.);
+            }
             if let Some(slug) = args.opt_str("model") {
                 let next = DeviceModel::from_slug(slug)
                     .ok_or_else(|| format!("No model {slug:?}; design_options lists them."))?;
@@ -722,7 +816,7 @@ fn apply(layer: &mut Layer, args: &Args, folder: &Path, new: bool) -> Result<Vec
                 *frame = Frame::from_slug(slug).ok_or_else(|| format!("No frame {slug:?}; design_options lists them."))?;
             }
             if let Some(path) = args.opt_str("screenshot") {
-                *screenshot = Some(import(path, folder)?.0);
+                *screenshot = Some(import_screen(path, folder)?);
             }
             if let Some(value) = args.opt_bool("shadow")? {
                 *shadow = value;
@@ -778,8 +872,123 @@ fn apply(layer: &mut Layer, args: &Args, folder: &Path, new: bool) -> Result<Vec
             None => layer.height = height.max(1.),
         }
     }
+    // Motion, for videos.
+    let effect = |key: &str| -> Result<Option<Effect>> {
+        args.opt_str(key)
+            .map(|slug| Effect::from_slug(slug).ok_or_else(|| format!("{key} should be one of none, fade, rise, slide, zoom, pop")))
+            .transpose()
+    };
+    if let Some(enter) = effect("enter")? {
+        layer.motion.enter = enter;
+    }
+    if let Some(exit) = effect("exit")? {
+        layer.motion.exit = exit;
+    }
+    if let Some(start) = args.opt_f32("comes_in_at")? {
+        layer.motion.start = start.max(0.);
+    }
+    if args.0.get("leaves_at").is_some_and(Value::is_null) {
+        layer.motion.leave = None;
+    } else if let Some(leave) = args.opt_f32("leaves_at")? {
+        layer.motion.leave = Some(leave.max(0.));
+    }
+    if let Some(length) = args.opt_f32("effect_length")? {
+        layer.motion.length = length.max(0.05);
+    }
+    if let Some(slug) = args.opt_str("drift") {
+        layer.motion.drift = Drift::from_slug(slug).ok_or_else(|| format!("No drift {slug:?}; design_options lists them."))?;
+    }
     layer.fit_text();
     Ok(notes)
+}
+
+fn set_video(doc: &mut Doc, args: &Args) -> Result<Value> {
+    if !args.opt_bool("enabled")?.ok_or("enabled is required")? {
+        doc.design.video = None;
+        return Ok(json!({ "video": null }));
+    }
+    let video = doc.design.video.get_or_insert_with(Video::default);
+    if let Some(slug) = args.opt_str("transition") {
+        video.transition = Transition::from_slug(slug).ok_or("transition should be push, fade or cut")?;
+    }
+    if let Some(length) = args.opt_f32("transition_length")? {
+        video.transition_length = length.clamp(0., 3.);
+    }
+    if let Some(fps) = args.opt_u64("fps")? {
+        video.fps = (fps as u32).clamp(1, 60);
+    }
+    let video = video.clone();
+    Ok(json!({
+        "video": video,
+        "length": motion::duration(&doc.design.slides),
+        "length_problem": appdoctor_video::length_problem(&doc.design),
+    }))
+}
+
+fn update_slide(doc: &mut Doc, args: &Args) -> Result<Value> {
+    let index = args.index("slide")?;
+    let duration = args.opt_f32("duration")?.ok_or("duration is required")?.clamp(0.5, 30.);
+    doc.slide(index)?.duration = duration;
+    Ok(json!({
+        "slide": index,
+        "duration": duration,
+        "length": motion::duration(&doc.design.slides),
+        "length_problem": doc.design.video.as_ref().and(appdoctor_video::length_problem(&doc.design)),
+    }))
+}
+
+fn render_moment(data_dir: &Path, args: &Args) -> Result<Vec<Value>> {
+    let doc = Doc::open(data_dir, args)?;
+    if doc.design.slides.is_empty() {
+        return Err("The design has no slides yet.".into());
+    }
+    let time = args.opt_f32("time")?.unwrap_or(0.).max(0.);
+    let scale = args.opt_f32("scale")?.unwrap_or(0.3).clamp(0.1, 0.5);
+    let mut design = doc.design.clone();
+    design.video.get_or_insert_with(Video::default);
+    let size = doc.target.video_size();
+    let clips = appdoctor_video::clip_source();
+    let png = render_frame(&design, time, size, &doc.folder, scale, clips.as_ref())
+        .and_then(|frame| {
+            frame
+                .encode_png()
+                .map_err(|error| appdoctor_screenshots::Error::Png(error.to_string()))
+        })
+        .map_err(|error| error.to_string())?;
+    let at = motion::moment(&design.slides, design.video.as_ref().unwrap_or(&Video::default()), time);
+    Ok(vec![
+        json!({
+            "type": "image",
+            "data": base64::engine::general_purpose::STANDARD.encode(png),
+            "mimeType": "image/png",
+        }),
+        json!({
+            "type": "text",
+            "text": format!(
+                "{time:.2} s of {:.1} s: scene {} at {:.2} s{}.",
+                motion::duration(&design.slides),
+                at.scene,
+                at.time,
+                at.next.map_or(String::new(), |(next, p)| format!(", {:.0}% into the transition to scene {next}", p * 100.))
+            ),
+        }),
+    ])
+}
+
+fn export_video(data_dir: &Path, args: &Args) -> Result<Vec<Value>> {
+    let doc = Doc::open(data_dir, args)?;
+    if doc.design.video.is_none() {
+        return Err("This design isn't a video yet: call set_video with enabled true first.".into());
+    }
+    let folder = PathBuf::from(args.opt_str("folder").ok_or("folder is required")?);
+    let out = folder.join(format!("{}.mp4", doc.target.video_size().slug()));
+    appdoctor_video::export(&doc.design, &doc.folder, &out, |_| true).map_err(|error| error.to_string())?;
+    Ok(text(json!({
+        "written": out.display().to_string(),
+        "size": doc.target.video_size().pixels(),
+        "length": motion::duration(&doc.design.slides),
+        "length_problem": appdoctor_video::length_problem(&doc.design),
+    })))
 }
 
 fn render_slide(data_dir: &Path, args: &Args) -> Result<Vec<Value>> {
@@ -793,7 +1002,9 @@ fn render_slide(data_dir: &Path, args: &Args) -> Result<Vec<Value>> {
     }
     let scale = args.opt_f32("scale")?.unwrap_or(0.3).clamp(0.1, 0.5);
     let size = doc.target.sizes()[0];
-    let png = render_png(&doc.design.slides, index, size, &doc.folder, scale).map_err(|error| error.to_string())?;
+    let clips = appdoctor_video::clip_source();
+    let png = render_png_with(&doc.design.slides, index, size, &doc.folder, scale, clips.as_ref())
+        .map_err(|error| error.to_string())?;
     let (w, h) = size.pixels();
     Ok(vec![
         json!({
@@ -821,9 +1032,11 @@ fn export(data_dir: &Path, args: &Args) -> Result<Vec<Value>> {
     let destination = PathBuf::from(folder);
     std::fs::create_dir_all(&destination).map_err(|error| format!("Couldn't create {folder}: {error}"))?;
     let mut written = Vec::new();
+    let clips = appdoctor_video::clip_source();
     for size in doc.target.sizes() {
         for index in 0..doc.design.slides.len() {
-            let png = render_png(&doc.design.slides, index, *size, &doc.folder, 1.0).map_err(|error| error.to_string())?;
+            let png = render_png_with(&doc.design.slides, index, *size, &doc.folder, 1.0, clips.as_ref())
+                .map_err(|error| error.to_string())?;
             let path = destination.join(format!("{:02}-{}.png", index + 1, size.slug()));
             std::fs::write(&path, png).map_err(|error| format!("Couldn't write {}: {error}", path.display()))?;
             written.push(path.display().to_string());

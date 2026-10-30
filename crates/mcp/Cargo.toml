@@ -9,6 +9,7 @@ publish.workspace = true
 [dependencies]
 appdoctor-screenshots.workspace = true
 appdoctor-store.workspace = true
+appdoctor-video.workspace = true
 base64.workspace = true
 # preserve_order: editing an AI app's settings keeps the user's key order.
 serde_json = { workspace = true, features = ["preserve_order"] }

@@ -27,6 +27,7 @@ fn main() {
                     .as_ref()
                     .map(|shot| shot.file_name().unwrap().to_string_lossy().into_owned()),
                 shadow: true,
+                clip_start: 0.,
             };
             let size = model.target().sizes()[0];
             device.width = device.width.min(1000.);

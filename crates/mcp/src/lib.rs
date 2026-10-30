@@ -25,7 +25,11 @@ from top and bottom) and the search result art (3:2, 3840 x 2560). A design is a
 background plus layers (text, device, image, shape) positioned in canvas pixels from the top-left. Device \
 layers can be any iPhone or iPad from iPhone X to iPhone 18 Pro Max and the iPhone Duo. Screenshot slides \
 sit edge to edge, so a layer whose x runs past the canvas width continues onto the next slide, which makes \
-panoramas; header and search slides are alternative versions. Start with list_apps and get_design, use design_options and list_fonts for \
+panoramas; header and search slides are alternative versions. Any design can also be a video \
+(set_video): slides become scenes, layers enter, leave and drift (the motion properties), device screens can \
+play screen recordings, render_frame shows any moment and export_video writes the MP4. To show the app in \
+motion, build it, run it in the iOS Simulator and record it with `xcrun simctl io booted recordVideo --codec \
+h264 <file>.mov`; read the app's own code to find what's worth showing. Start with list_apps and get_design, use design_options and list_fonts for \
 allowed values, and look at your work with render_slide before you say it's done. The user sees every \
 change live in AppDoctor and can undo it.";
 

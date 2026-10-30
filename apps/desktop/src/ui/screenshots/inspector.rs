@@ -1,7 +1,7 @@
 //! The right-hand inspector: the selected layer's properties, or the
 //! screenshot's background when nothing is selected.
 
-use appdoctor_screenshots::{Align, BACKGROUND_PRESETS, Background, Frame, Layer, LayerKind, Target};
+use appdoctor_screenshots::{Align, BACKGROUND_PRESETS, Background, Drift, Effect, Frame, Layer, LayerKind, Target, Transition};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputState, Textarea};
 use gpui_kit::component::select::Select;
@@ -30,6 +30,15 @@ const ALIGNS: &[(&str, Align)] = &[
     ("Left", Align::Left),
     ("Centre", Align::Center),
     ("Right", Align::Right),
+];
+/// Drifts offered in the inspector (agents can also zoom out).
+const DRIFTS: [(Drift, &str); 6] = [
+    (Drift::None, "None"),
+    (Drift::Up, "Up"),
+    (Drift::Down, "Down"),
+    (Drift::Left, "Left"),
+    (Drift::Right, "Right"),
+    (Drift::ZoomIn, "Zoom"),
 ];
 const ANGLES: &[(&str, &str, i32)] = &[
     ("↓", "Top to bottom", 180),
@@ -326,6 +335,7 @@ impl ScreenshotsView {
                 frame,
                 shadow,
                 screenshot,
+                ..
             } => {
                 let model = *model;
                 // Every iPhone and iPad, newest first; type to search.
@@ -469,6 +479,118 @@ impl ScreenshotsView {
             .child(kind)
             .child(arrange)
             .child(appearance)
+            .when(self.design.video.is_some(), |this| this.child(self.motion_properties(layer, cx)))
+    }
+
+    /// When the layer enters, leaves and drifts in the video.
+    fn motion_properties(&self, layer: &Layer, cx: &mut Context<Self>) -> Div {
+        let motion = &layer.motion;
+        let effects = |id: &'static str, current: Effect, leaving: bool, cx: &mut Context<Self>| {
+            Effect::ALL
+                .iter()
+                .fold(Segmented::new(id, CONTENT - 20.), |control, effect| control.label(effect.label()))
+                .selected(Effect::ALL.iter().position(|e| *e == current).unwrap_or(0))
+                .on_select(cx.listener(move |this, ix: &usize, window, cx| {
+                    this.set_effect(Effect::ALL[*ix], leaving, window, cx)
+                }))
+        };
+        let drifts = DRIFTS
+            .iter()
+            .fold(Segmented::new("drift", CONTENT - 20.), |control, (_, label)| control.label(*label))
+            .selected(DRIFTS.iter().position(|(d, _)| *d == motion.drift).unwrap_or(0))
+            .on_select(cx.listener(|this, ix: &usize, window, cx| this.set_drift(DRIFTS[*ix].0, window, cx)));
+        v_flex().child(heading("Motion", cx)).child(
+            group(cx)
+                .child(stacked("Enter", None, effects("enter", motion.enter, false, cx), cx))
+                .child(separator(cx))
+                .child(stacked(
+                    "Comes in at",
+                    Some(format!("{:.1} s", motion.start)),
+                    Slider::new(&self.sliders.start),
+                    cx,
+                ))
+                .child(separator(cx))
+                .child(stacked("Exit", None, effects("exit", motion.exit, true, cx), cx))
+                .child(separator(cx))
+                .child(stacked(
+                    "Leaves at",
+                    Some(motion.leave.map_or_else(|| "Stays".to_owned(), |t| format!("{t:.1} s"))),
+                    Slider::new(&self.sliders.leave),
+                    cx,
+                ))
+                .child(separator(cx))
+                .child(stacked("Drift", None, drifts, cx)),
+        )
+    }
+
+    /// Plays the slides as scenes: on or off, this scene's length, the
+    /// transition, and the total against Apple's limits.
+    fn video_properties(&self, cx: &mut Context<Self>) -> Div {
+        let theme = cx.theme().clone();
+        let video = self.design.video.clone();
+        let length = self.duration();
+        let problem = video.as_ref().and_then(|_| appdoctor_video::length_problem(&self.design));
+        let scene = self.current().map_or(0., |slide| slide.duration);
+        let about = match self.target {
+            Target::Iphone | Target::Ipad => {
+                "Plays these slides as scenes: an App Store app preview, 15–30 seconds, exported at Apple's size."
+            }
+            Target::Header | Target::Search => {
+                "A looping, muted 5–30 second video for this spot. iOS 27 plays it in place of the image."
+            }
+        };
+        let on = video.is_some();
+        v_flex()
+            .child(heading("Video", cx))
+            .child(
+                group(cx)
+                    .child(row(
+                        "Make a video",
+                        Switch::new("video-on")
+                            .checked(on)
+                            .on_click(cx.listener(move |this, checked: &bool, window, cx| {
+                                if *checked != on {
+                                    this.set_video(*checked, window, cx)
+                                }
+                            })),
+                        cx,
+                    ))
+                    .when_some(video, |this, video| {
+                        let transitions = Transition::ALL
+                            .iter()
+                            .fold(Segmented::new("transition", ROW_CONTROL), |control, t| control.label(t.label()))
+                            .selected(Transition::ALL.iter().position(|t| *t == video.transition).unwrap_or(0))
+                            .on_select(cx.listener(|this, ix: &usize, window, cx| {
+                                this.set_transition(Transition::ALL[*ix], window, cx)
+                            }));
+                        this.child(separator(cx))
+                            .child(stacked(
+                                "This scene",
+                                Some(format!("{scene:.1} s")),
+                                Slider::new(&self.sliders.scene),
+                                cx,
+                            ))
+                            .child(separator(cx))
+                            .child(row("Transition", transitions, cx))
+                            .child(separator(cx))
+                            .child(row(
+                                "Length",
+                                div()
+                                    .text_size(px(13.))
+                                    .text_color(if problem.is_some() { theme.warning } else { theme.muted_foreground })
+                                    .child(format!("{length:.1} s")),
+                                cx,
+                            ))
+                    }),
+            )
+            .child(
+                div()
+                    .px(px(4.))
+                    .pt(px(6.))
+                    .text_size(px(11.))
+                    .text_color(if problem.is_some() { theme.warning } else { theme.muted_foreground })
+                    .child(problem.unwrap_or_else(|| about.to_owned())),
+            )
     }
 
     fn slide_properties(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -648,6 +770,7 @@ impl ScreenshotsView {
                     .child(h_flex().flex_wrap().gap(px(8.)).pb(px(12.)).children(presets))
                     .child(fill),
             )
+            .child(self.video_properties(cx))
             .child(tips)
     }
 }

@@ -1,0 +1,21 @@
+[package]
+name = "appdoctor-video"
+description = "Video for AppDoctor's designs: decoding screen recordings and encoding MP4, through AVFoundation on macOS."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+appdoctor-screenshots.workspace = true
+thiserror.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6.5"
+objc2-foundation = "0.3.2"
+objc2-av-foundation = { version = "0.3.2", features = ["block2", "objc2-core-media", "objc2-core-video", "objc2-core-graphics"] }
+objc2-core-media = "0.3.2"
+objc2-core-video = "0.3.2"
+objc2-core-graphics = "0.3.2"
+objc2-core-foundation = "0.3.2"
+block2 = "0.6.2"

@@ -2,13 +2,15 @@
 //! and the floating tools.
 
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
 use appdoctor_screenshots::edit::{Corner, Guide};
 use appdoctor_screenshots::{
-    Align, Background, DEFAULT_FONT, LINE_HEIGHT, Layer, LayerKind, Rect, Slide, Target, device_geometry, parse_color,
-    visible_layers,
+    Align, Background, DEFAULT_FONT, LINE_HEIGHT, Layer, LayerKind, Rect, Slide, Target, Transition, device_geometry,
+    is_video, motion, parse_color, visible_layers,
 };
+use gpui_kit::component::slider::Slider;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -83,8 +85,9 @@ fn drop_shadow(s: f32) -> Vec<BoxShadow> {
     }]
 }
 
-/// A layer's look at scale `s`, positioned inside its own box.
-fn layer_visual(layer: &Layer, s: f32, folder: &Path) -> AnyElement {
+/// A layer's look at scale `s`, positioned inside its own box. `clip` is
+/// the current frame of a device's screen recording.
+fn layer_visual(layer: &Layer, s: f32, folder: &Path, clip: Option<Arc<Image>>) -> AnyElement {
     let (w, h) = (layer.width * s, layer.height * s);
     match &layer.kind {
         LayerKind::Text {
@@ -122,6 +125,7 @@ fn layer_visual(layer: &Layer, s: f32, folder: &Path) -> AnyElement {
             frame,
             screenshot,
             shadow,
+            ..
         } => {
             let g = device_geometry(layer, *model, *frame);
             let glass = color(frame.glass_color(*model));
@@ -140,9 +144,17 @@ fn layer_visual(layer: &Layer, s: f32, folder: &Path) -> AnyElement {
                 .when(*shadow && frame.edge_color().is_none(), |this| {
                     this.shadow(drop_shadow(s))
                 })
-                .when_some(screenshot.clone(), |this, file| {
+                .when_some(screenshot.clone().filter(|file| !is_video(file)), |this, file| {
                     this.child(
                         img(folder.join(file))
+                            .size_full()
+                            .object_fit(ObjectFit::Cover)
+                            .rounded(px(g.screen_radius * s)),
+                    )
+                })
+                .when_some(clip, |this, frame| {
+                    this.child(
+                        img(frame)
                             .size_full()
                             .object_fit(ObjectFit::Cover)
                             .rounded(px(g.screen_radius * s)),
@@ -250,7 +262,7 @@ impl ScreenshotsView {
             .map(|(owner, layer)| {
                 let (owner, id, locked) = (*owner, layer.id, layer.locked);
                 let element = self
-                    .positioned(layer, s, folder)
+                    .positioned(layer, s, folder, None)
                     .id(SharedString::from(format!("layer-{index}-{owner}-{id}")));
                 if active && owner == index {
                     element
@@ -429,7 +441,17 @@ impl ScreenshotsView {
     }
 
     /// A layer drawn in an absolutely positioned box at scale `s`.
-    fn positioned(&self, layer: &Layer, s: f32, folder: &Path) -> Div {
+    /// A layer placed on its slide. A device playing a recording shows the
+    /// frame at `clip_time`, or at its start when that's `None`.
+    fn positioned(&self, layer: &Layer, s: f32, folder: &Path, clip_time: Option<f32>) -> Div {
+        let clip = match &layer.kind {
+            LayerKind::Device {
+                screenshot: Some(file),
+                clip_start,
+                ..
+            } if is_video(file) => self.clips.get(&folder.join(file), clip_time.unwrap_or(*clip_start)),
+            _ => None,
+        };
         div()
             .absolute()
             .left(px(layer.x * s))
@@ -437,7 +459,7 @@ impl ScreenshotsView {
             .w(px(layer.width * s))
             .h(px(layer.height * s))
             .opacity(layer.opacity.clamp(0., 1.))
-            .child(layer_visual(layer, s, folder))
+            .child(layer_visual(layer, s, folder, clip))
     }
 
     fn selection_box(&self, layer: &Layer, s: f32, cx: &mut Context<Self>) -> AnyElement {
@@ -546,6 +568,134 @@ impl ScreenshotsView {
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(theme.muted_foreground)
                     .child(label),
+            )
+    }
+
+    /// The video at the playhead, fitted whole into the stage.
+    fn preview_canvas(&self, window: &Window, folder: &Path, cx: &mut Context<Self>) -> AnyElement {
+        let (width, height) = self.target.canvas();
+        let viewport = window.viewport_size();
+        let available_h = f32::from(viewport.height) - TITLE_BAR - HEADER - STAGE_TOP - STAGE_BOTTOM - 30.;
+        let panels = if self.left_open { LEFT_PANEL } else { 0. } + if self.right_open { RIGHT_PANEL } else { 0. };
+        let available_w = f32::from(viewport.width) - SIDEBAR - panels - 80.;
+        let s = (available_h / height).min(available_w / width).clamp(0.05, 1.);
+
+        let video = self.design.video.clone().unwrap_or_default();
+        let at = motion::moment(&self.design.slides, &video, self.time);
+        let mut parts = Vec::new();
+        match at.next {
+            Some((next, p)) if video.transition == Transition::Push => {
+                self.scene_parts(&mut parts, at.scene, at.time, -p * width, 1., Some(next), s, folder);
+                self.scene_parts(&mut parts, next, 0., (1. - p) * width, 1., Some(at.scene), s, folder);
+            }
+            Some((next, p)) => {
+                self.scene_parts(&mut parts, at.scene, at.time, 0., 1., None, s, folder);
+                self.scene_parts(&mut parts, next, 0., 0., p, None, s, folder);
+            }
+            None => self.scene_parts(&mut parts, at.scene, at.time, 0., 1., None, s, folder),
+        }
+        let theme = cx.theme();
+        v_flex()
+            .gap_2()
+            .items_center()
+            .child(
+                div()
+                    .relative()
+                    .w(px(width * s))
+                    .h(px(height * s))
+                    .overflow_hidden()
+                    .rounded(px(8.))
+                    .shadow_lg()
+                    .children(parts),
+            )
+            .child(
+                div()
+                    .text_size(px(11.))
+                    .text_color(theme.muted_foreground)
+                    .child(format!("Scene {} of {}", at.scene + 1, self.design.slides.len())),
+            )
+            .into_any_element()
+    }
+
+    /// One scene of the preview, `offset` canvas pixels across and faded
+    /// by `opacity`, as `render_frame` draws it for export.
+    #[allow(clippy::too_many_arguments)]
+    fn scene_parts(
+        &self,
+        parts: &mut Vec<AnyElement>,
+        index: usize,
+        time: f32,
+        offset: f32,
+        opacity: f32,
+        skip: Option<usize>,
+        s: f32,
+        folder: &Path,
+    ) {
+        let Some(slide) = self.design.slides.get(index) else {
+            return;
+        };
+        let canvas = self.target.canvas();
+        parts.push(
+            div()
+                .absolute()
+                .top_0()
+                .left(px(offset * s))
+                .w(px(canvas.0 * s))
+                .h(px(canvas.1 * s))
+                .bg(background_fill(&slide.background))
+                .opacity(opacity)
+                .into_any_element(),
+        );
+        let layers = motion::scene_layers(&self.design.slides, index, time, canvas, self.target.is_screenshot(), skip);
+        for (_, mut layer, clip) in layers {
+            layer.x += offset;
+            layer.opacity *= opacity;
+            parts.push(self.positioned(&layer, s, folder, Some(clip)).into_any_element());
+        }
+    }
+
+    /// Play, the playhead and the time, in place of the tools while
+    /// previewing.
+    fn transport(&self, cx: &mut Context<Self>) -> Div {
+        let theme = cx.theme().clone();
+        let clock = |t: f32| format!("{}:{:04.1}", (t / 60.).floor() as u32, t % 60.);
+        h_flex()
+            .px_3()
+            .py_2()
+            .gap_3()
+            .items_center()
+            .rounded(px(18.))
+            .border_1()
+            .border_color(theme.border.opacity(0.7))
+            .bg(theme.popover.opacity(0.92))
+            .shadow_lg()
+            .child(
+                Button::new("transport-play")
+                    .ghost()
+                    .small()
+                    .icon(if self.playing {
+                        gpui_kit::assets::IconName::Pause
+                    } else {
+                        gpui_kit::assets::IconName::Play
+                    })
+                    .tooltip(if self.playing { "Pause  Space" } else { "Play  Space" })
+                    .on_click(cx.listener(|this, _, window, cx| this.toggle_play(window, cx))),
+            )
+            .child(
+                div()
+                    .w(px(96.))
+                    .text_size(px(12.))
+                    .font_family(theme.mono_font_family.clone())
+                    .text_color(theme.muted_foreground)
+                    .child(format!("{} / {}", clock(self.time), clock(self.duration()))),
+            )
+            .child(div().w(px(320.)).child(Slider::new(&self.sliders.time)))
+            .child(
+                Button::new("transport-edit")
+                    .ghost()
+                    .small()
+                    .label("Edit")
+                    .on_click(cx.listener(|this, _, _, cx| this.set_preview(false, cx))),
             )
     }
 
@@ -837,7 +987,13 @@ impl ScreenshotsView {
             .border_r_1()
             .border_color(theme.border)
             .child(
-                Self::panel_heading(if self.target.is_screenshot() { "Screenshots" } else { "Versions" })
+                Self::panel_heading(if self.design.video.is_some() {
+                    "Scenes"
+                } else if self.target.is_screenshot() {
+                    "Screenshots"
+                } else {
+                    "Versions"
+                })
                     .child(
                         small("duplicate-slide", Icon::new(IconName::Copy), "Duplicate screenshot")
                             .on_click(cx.listener(|this, _, window, cx| this.add_slide(true, window, cx))),
@@ -980,30 +1136,65 @@ impl Render for ScreenshotsView {
                     .tooltip("Let your AI agent design these")
                     .on_click(cx.listener(|this, _, window, cx| this.open_agent_dialog(window, cx))),
             )
+            .when(self.design.video.is_some(), |this| {
+                this.child(
+                    Button::new("preview-video")
+                        .ghost()
+                        .small()
+                        .icon(if self.preview {
+                            Icon::new(IconName::Close)
+                        } else {
+                            Icon::new(gpui_kit::assets::IconName::Play)
+                        })
+                        .label(if self.preview { "Edit" } else { "Preview" })
+                        .tooltip("Play the video  Space")
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            if this.preview {
+                                this.set_preview(false, cx);
+                            } else {
+                                this.toggle_play(window, cx);
+                            }
+                        })),
+                )
+            })
             .child(
                 Button::new("export-shots")
                     .small()
-                    .primary()
+                    .when(self.design.video.is_none(), |button| button.primary())
                     .icon(IconName::ArrowDown)
                     .label("Export PNGs")
-                    .loading(self.exporting)
+                    .loading(self.exporting && self.design.video.is_none())
                     .disabled(self.exporting || self.design.slides.is_empty())
                     .on_click(cx.listener(|this, _, window, cx| this.export(window, cx))),
-            );
+            )
+            .when(self.design.video.is_some(), |this| {
+                this.child(
+                    Button::new("export-video")
+                        .small()
+                        .primary()
+                        .icon(gpui_kit::assets::IconName::Clapperboard)
+                        .label("Export video")
+                        .loading(self.exporting)
+                        .disabled(self.exporting || self.design.slides.is_empty())
+                        .on_click(cx.listener(|this, _, window, cx| this.export_video(window, cx))),
+                )
+            });
 
-        let slides: Vec<_> = self
-            .design
-            .slides
-            .clone()
-            .iter()
-            .enumerate()
-            .map(|(ix, slide)| self.slide_canvas(ix, slide, s, &folder, cx))
-            .collect();
+        let slides: Vec<_> = if self.preview {
+            vec![self.preview_canvas(window, &folder, cx)]
+        } else {
+            self.design
+                .slides
+                .clone()
+                .iter()
+                .enumerate()
+                .map(|(ix, slide)| self.slide_canvas(ix, slide, s, &folder, cx))
+                .collect()
+        };
 
         let hidden = self.chrome_hidden;
         let fade = Animation::new(Duration::from_millis(if hidden { 140 } else { 260 })).with_easing(ease_in_out);
-        let tools = self
-            .tools_pill(cx)
+        let tools = if self.preview { self.transport(cx) } else { self.tools_pill(cx) }
             .with_animation(("tools", self.chrome_epoch), fade.clone(), move |this, d| {
                 let t = if hidden { 1. - d } else { d };
                 this.opacity(t).mb(px(16. * (1. - t)))

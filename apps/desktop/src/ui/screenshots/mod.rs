@@ -12,6 +12,7 @@
 //! step.
 
 mod agent;
+mod clips;
 mod inspector;
 mod view;
 
@@ -21,8 +22,9 @@ use std::time::{Duration, Instant};
 
 use appdoctor_screenshots::edit::{Corner, Guide, resize, snap_move};
 use appdoctor_screenshots::{
-    Align, Background, CanvasSize, DEFAULT_FONT, Design, DeviceModel, Frame, Layer, LayerKind, Rect, SUGGESTED_FONTS,
-    Slide, Target, font_families, import_image, render_png, write_atomic,
+    Align, Background, CanvasSize, DEFAULT_FONT, Design, DeviceModel, Drift, Effect, Frame, Layer, LayerKind, Rect,
+    SUGGESTED_FONTS, Slide, Target, Transition, Video, font_families, import_image, import_media, motion,
+    render_png_with, write_atomic,
 };
 use gpui_kit::component::input::{InputEvent, InputState, TextareaState};
 use gpui_kit::component::select::{SearchableVec, SelectEvent, SelectItem, SelectState};
@@ -30,6 +32,7 @@ use gpui_kit::component::slider::{SliderEvent, SliderState};
 use gpui_kit::*;
 
 use crate::state::AppState;
+use clips::ClipFrames;
 
 /// Undo steps kept.
 const HISTORY: usize = 100;
@@ -131,6 +134,12 @@ struct Sliders {
     size: Entity<SliderState>,
     opacity: Entity<SliderState>,
     radius: Entity<SliderState>,
+    /// The scene's length, and the selected layer's start and leave times.
+    scene: Entity<SliderState>,
+    start: Entity<SliderState>,
+    leave: Entity<SliderState>,
+    /// The preview's playhead.
+    time: Entity<SliderState>,
 }
 
 pub struct ScreenshotsView {
@@ -173,6 +182,14 @@ pub struct ScreenshotsView {
     syncing: bool,
     status: Option<Result<String, String>>,
     exporting: bool,
+    /// Showing the video as it plays, rather than the slides to edit.
+    preview: bool,
+    playing: bool,
+    /// The playhead, in seconds.
+    time: f32,
+    clips: ClipFrames,
+    _ticker: Option<Task<()>>,
+    _clips: Task<()>,
     _save: Option<Task<()>>,
     _thumbs: Option<Task<()>>,
     _watch: Task<()>,
@@ -195,11 +212,21 @@ impl ScreenshotsView {
         let slider = |min: f32, max: f32, cx: &mut Context<Self>| {
             cx.new(|_| SliderState::new().min(min).max(max).step(1.).default_value(min))
         };
+        let seconds = |max: f32, step: f32, cx: &mut Context<Self>| {
+            cx.new(|_| SliderState::new().min(0.).max(max).step(step).default_value(0.))
+        };
         let sliders = Sliders {
             size: slider(16., 240., cx),
             opacity: slider(0., 100., cx),
             radius: slider(0., 300., cx),
+            scene: cx.new(|_| SliderState::new().min(1.).max(12.).step(0.5).default_value(3.)),
+            // Shares of the scene's length, which differs per scene.
+            start: seconds(1., 0.01, cx),
+            leave: seconds(1., 0.01, cx),
+            // A share of the video's length, which changes as scenes do.
+            time: seconds(1., 0.001, cx),
         };
+        let (clip_frames, clips_task) = ClipFrames::new(cx);
 
         let fonts = cx.new(|cx| FontSelect::new(SearchableVec::new(Vec::new()), None, window, cx).searchable(true));
         let model_items: Vec<ModelItem> = DeviceModel::all()
@@ -320,6 +347,49 @@ impl ScreenshotsView {
                 }),
             );
         }
+        subscriptions.push(cx.subscribe(&sliders.scene, |this, _, event: &SliderEvent, cx| {
+            if let SliderEvent::Change(value) = event
+                && !this.syncing
+            {
+                let length = value.start();
+                this.checkpoint_coalesced();
+                if let Some(slide) = this.current_mut() {
+                    slide.duration = length;
+                }
+                this.changed(cx);
+            }
+        }));
+        for (slider, leaving) in [(&sliders.start, false), (&sliders.leave, true)] {
+            subscriptions.push(cx.subscribe(slider, move |this, _, event: &SliderEvent, cx| {
+                let SliderEvent::Change(value) = event else {
+                    return;
+                };
+                if this.syncing {
+                    return;
+                }
+                let scene = this.current().map_or(motion::DEFAULT_SCENE, |s| s.duration);
+                // To a tenth of a second, as the inspector shows it.
+                let seconds = (value.start() * scene * 10.).round() / 10.;
+                this.edit_selected(cx, |layer| {
+                    if leaving {
+                        // All the way along means it stays to the end.
+                        layer.motion.leave = (seconds < scene - 0.05).then_some(seconds);
+                    } else {
+                        layer.motion.start = seconds;
+                    }
+                });
+            }));
+        }
+        subscriptions.push(cx.subscribe(&sliders.time, |this, _, event: &SliderEvent, cx| {
+            if let SliderEvent::Change(value) = event
+                && !this.syncing
+            {
+                this.time = value.start() * this.duration();
+                this.playing = false;
+                this._ticker = None;
+                cx.notify();
+            }
+        }));
         for (slider, which) in [(&sliders.size, 0), (&sliders.opacity, 1), (&sliders.radius, 2)] {
             subscriptions.push(cx.subscribe(slider, move |this, _, event: &SliderEvent, cx| {
                 let SliderEvent::Change(value) = event else {
@@ -377,6 +447,12 @@ impl ScreenshotsView {
             syncing: false,
             status: None,
             exporting: false,
+            preview: false,
+            playing: false,
+            time: 0.,
+            clips: clip_frames,
+            _ticker: None,
+            _clips: clips_task,
             _save: None,
             _thumbs: None,
             _watch: watch,
@@ -420,7 +496,13 @@ impl ScreenshotsView {
     /// What one slide is called: screenshots form a set, while header and
     /// search art are alternatives of one asset.
     fn slide_noun(&self) -> &'static str {
-        if self.target.is_screenshot() { "Screenshot" } else { "Version" }
+        if self.design.video.is_some() {
+            "Scene"
+        } else if self.target.is_screenshot() {
+            "Screenshot"
+        } else {
+            "Version"
+        }
     }
 
     /// Opens the selected app's design for the current target, starting
@@ -456,6 +538,10 @@ impl ScreenshotsView {
         self.redo.clear();
         self.status = None;
         self.thumbs.clear();
+        self.preview = false;
+        self.playing = false;
+        self._ticker = None;
+        self.time = 0.;
         self.sync_controls(window, cx);
         self.render_thumbs(cx);
         // A new design is saved straight away, so an agent sees what you see.
@@ -564,8 +650,9 @@ impl ScreenshotsView {
         self._thumbs = Some(cx.spawn(async move |this, cx| {
             let rendered = cx
                 .background_spawn(async move {
+                    let clip_source = appdoctor_video::clip_source();
                     (0..slides.len())
-                        .map(|ix| render_thumb(&slides, ix, size, &folder))
+                        .map(|ix| render_thumb(&slides, ix, size, &folder, clip_source.as_ref()))
                         .collect::<Vec<_>>()
                 })
                 .await;
@@ -725,6 +812,14 @@ impl ScreenshotsView {
                 }
             }
         }
+        if let Some(scene) = self.current().map(|slide| slide.duration) {
+            set_slider(&self.sliders.scene, scene, window, cx);
+            if let Some(layer) = self.selected_layer().cloned() {
+                let share = |seconds: f32| (seconds / scene.max(0.1)).clamp(0., 1.);
+                set_slider(&self.sliders.start, share(layer.motion.start), window, cx);
+                set_slider(&self.sliders.leave, share(layer.motion.leave.unwrap_or(scene)), window, cx);
+            }
+        }
         if let Some(background) = self.current().map(|slide| slide.background.clone()) {
             let (from, to) = match background {
                 Background::Solid { color } => (color.clone(), color),
@@ -815,6 +910,18 @@ impl ScreenshotsView {
         cx: &mut Context<Self>,
         use_it: fn(&mut Self, String, (f32, f32), &mut Window, &mut Context<Self>),
     ) {
+        self.pick_file(false, window, cx, use_it);
+    }
+
+    /// Picks an image, or with `videos` a screen recording too, and copies
+    /// it into the design's folder. Recordings report no size.
+    fn pick_file(
+        &mut self,
+        videos: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        use_it: fn(&mut Self, String, (f32, f32), &mut Window, &mut Context<Self>),
+    ) {
         let Some(folder) = self.folder(cx) else {
             return;
         };
@@ -831,7 +938,12 @@ impl ScreenshotsView {
             let Some(source) = paths.into_iter().next() else {
                 return;
             };
-            let imported = import_image(&source, &folder);
+            let name = source.to_string_lossy().into_owned();
+            let imported = if videos && appdoctor_screenshots::is_video(&name) {
+                import_media(&source, &folder).map(|name| (name, (0., 0.)))
+            } else {
+                import_image(&source, &folder)
+            };
             this.update_in(cx, |this, window, cx| match imported {
                 Ok((name, size)) => use_it(this, name, size, window, cx),
                 Err(error) => {
@@ -855,8 +967,10 @@ impl ScreenshotsView {
     }
 
     /// Sets the selected device's (or the slide's first device's) screenshot.
+    /// Sets the selected device's (or the slide's first device's) screen:
+    /// a screenshot, or a screen recording that plays in videos.
     fn choose_screenshot(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.pick_image(window, cx, |this, name, _, window, cx| {
+        self.pick_file(true, window, cx, |this, name, _, window, cx| {
             let target = this
                 .selected_layer()
                 .filter(|l| matches!(l.kind, LayerKind::Device { .. }))
@@ -1202,7 +1316,9 @@ impl ScreenshotsView {
             ("]", true) => self.restack(1, shift, window, cx),
             ("[", true) => self.restack(-1, shift, window, cx),
             ("backspace" | "delete", _) => self.delete_selected(window, cx),
+            ("escape", _) if self.preview => self.set_preview(false, cx),
             ("escape", _) => self.select(None, window, cx),
+            ("space", false) if self.design.video.is_some() => self.toggle_play(window, cx),
             ("\\", true) => {
                 let open = !(self.left_open || self.right_open);
                 self.set_panels(open, open, cx);
@@ -1266,10 +1382,13 @@ impl ScreenshotsView {
             let destination = target.clone();
             let result = cx
                 .background_spawn(async move {
+                    // Recordings show their first frame in stills.
+                    let clip_source = appdoctor_video::clip_source();
                     let mut written = 0;
                     for size in sizes {
                         for index in 0..slides.len() {
-                            let png = render_png(&slides, index, *size, &folder, 1.0).map_err(|e| e.to_string())?;
+                            let png = render_png_with(&slides, index, *size, &folder, 1.0, clip_source.as_ref())
+                                .map_err(|e| e.to_string())?;
                             let name = format!("{:02}-{}.png", index + 1, size.slug());
                             std::fs::write(destination.join(name), png).map_err(|e| e.to_string())?;
                             written += 1;
@@ -1281,6 +1400,148 @@ impl ScreenshotsView {
             this.update(cx, |this, cx| {
                 this.exporting = false;
                 this.status = Some(result.map(|count| format!("Exported {count} PNGs to {}", target.display())));
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    // Video
+
+    /// Turns the design into a video, or back into stills.
+    fn set_video(&mut self, on: bool, window: &mut Window, cx: &mut Context<Self>) {
+        self.apply(window, cx, |this| {
+            this.design.video = on.then(|| this.design.video.clone().unwrap_or_default());
+        });
+        if !on {
+            self.set_preview(false, cx);
+        }
+    }
+
+    fn set_transition(&mut self, transition: Transition, window: &mut Window, cx: &mut Context<Self>) {
+        self.apply(window, cx, |this| {
+            this.design.video.get_or_insert_with(Video::default).transition = transition;
+        });
+    }
+
+    fn set_effect(&mut self, effect: Effect, leaving: bool, window: &mut Window, cx: &mut Context<Self>) {
+        self.apply_to_selected(window, cx, |layer| {
+            if leaving {
+                layer.motion.exit = effect;
+            } else {
+                layer.motion.enter = effect;
+            }
+        });
+    }
+
+    fn set_drift(&mut self, drift: Drift, window: &mut Window, cx: &mut Context<Self>) {
+        self.apply_to_selected(window, cx, |layer| layer.motion.drift = drift);
+    }
+
+    fn duration(&self) -> f32 {
+        motion::duration(&self.design.slides)
+    }
+
+    /// Shows the video at the playhead instead of the slides, or goes back.
+    fn set_preview(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.preview = on;
+        if !on {
+            self.playing = false;
+            self._ticker = None;
+        }
+        cx.notify();
+    }
+
+    fn toggle_play(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.playing {
+            self.playing = false;
+            self._ticker = None;
+            cx.notify();
+            return;
+        }
+        self.preview = true;
+        self.playing = true;
+        if self.time >= self.duration() - 0.05 {
+            self.time = 0.;
+        }
+        // Advance by the real time between frames, looping at the end like
+        // the App Store's header does.
+        self._ticker = Some(cx.spawn_in(window, async move |this, cx| {
+            let mut last = Instant::now();
+            loop {
+                cx.background_executor().timer(Duration::from_millis(16)).await;
+                let now = Instant::now();
+                let step = (now - last).as_secs_f32();
+                last = now;
+                let alive = this.update_in(cx, |this, window, cx| {
+                    let length = this.duration().max(0.1);
+                    this.time = (this.time + step) % length;
+                    this.syncing = true;
+                    let share = this.time / length;
+                    this.sliders
+                        .time
+                        .update(cx, |slider, cx| slider.set_value(share, window, cx));
+                    this.syncing = false;
+                    cx.notify();
+                });
+                if alive.is_err() {
+                    break;
+                }
+            }
+        }));
+        cx.notify();
+    }
+
+    /// Renders the video with AVFoundation into a folder the user picks.
+    fn export_video(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(folder) = self.folder(cx) else {
+            return;
+        };
+        let paths = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some("Export Here".into()),
+        });
+        let design = self.design.clone();
+        let name = format!("{}.mp4", design.target.video_size().slug());
+        cx.spawn_in(window, async move |this, cx| {
+            let Ok(Ok(Some(paths))) = paths.await else {
+                return;
+            };
+            let Some(target) = paths.into_iter().next() else {
+                return;
+            };
+            let out = target.join(&name);
+            let (progress, mut updates) = futures::channel::mpsc::unbounded::<f32>();
+            this.update(cx, |this, cx| {
+                this.exporting = true;
+                this.status = Some(Ok("Exporting video…".into()));
+                cx.notify();
+            })
+            .ok();
+            let job = cx.background_spawn({
+                let out = out.clone();
+                async move {
+                    appdoctor_video::export(&design, &folder, &out, |done| {
+                        let _ = progress.unbounded_send(done);
+                        true
+                    })
+                    .map_err(|error| error.to_string())
+                }
+            });
+            while let Some(done) = futures::StreamExt::next(&mut updates).await {
+                this.update(cx, |this, cx| {
+                    this.status = Some(Ok(format!("Exporting video… {:.0}%", done * 100.)));
+                    cx.notify();
+                })
+                .ok();
+            }
+            let result = job.await;
+            this.update(cx, |this, cx| {
+                this.exporting = false;
+                this.status = Some(result.map(|()| format!("Saved {} to {}", name, target.display())));
                 cx.notify();
             })
             .ok();
@@ -1385,8 +1646,14 @@ impl ScreenshotsView {
     }
 }
 
-fn render_thumb(slides: &[Slide], index: usize, size: CanvasSize, folder: &Path) -> Option<Arc<Image>> {
-    match render_png(slides, index, size, folder, THUMB_SCALE) {
+fn render_thumb(
+    slides: &[Slide],
+    index: usize,
+    size: CanvasSize,
+    folder: &Path,
+    clips: &dyn appdoctor_screenshots::ClipSource,
+) -> Option<Arc<Image>> {
+    match render_png_with(slides, index, size, folder, THUMB_SCALE, clips) {
         Ok(png) => Some(Arc::new(Image::from_bytes(ImageFormat::Png, png))),
         Err(error) => {
             tracing::warn!(%error, "thumbnail render failed");

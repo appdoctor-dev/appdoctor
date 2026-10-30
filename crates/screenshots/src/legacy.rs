@@ -12,6 +12,8 @@ const V1_DEVICE_ASPECT: f32 = 2.167;
 struct Current {
     #[serde(default)]
     target: Target,
+    #[serde(default)]
+    video: Option<crate::Video>,
     slides: Vec<Slide>,
 }
 
@@ -49,6 +51,7 @@ pub(crate) fn parse(bytes: &[u8]) -> Option<Design> {
         return Some(Design {
             version: 2,
             target: current.target,
+            video: current.video,
             slides: current.slides,
         });
     }
@@ -78,16 +81,19 @@ pub(crate) fn parse(bytes: &[u8]) -> Option<Design> {
                 frame: slide.device.frame,
                 screenshot: slide.device.screenshot,
                 shadow: true,
+                clip_start: 0.,
             };
             Slide {
                 background: slide.background,
                 layers: vec![headline, subheadline, device],
+                duration: crate::motion::DEFAULT_SCENE,
             }
         })
         .collect();
     Some(Design {
         version: 2,
         target: Target::Iphone,
+        video: None,
         slides,
     })
 }
