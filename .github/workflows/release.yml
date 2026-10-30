@@ -132,7 +132,18 @@ jobs:
           printf '%s' "$API_KEY" > "$RUNNER_TEMP/notary.p8"
           xcrun notarytool submit dist/AppDoctor-macOS.dmg --wait \
             --key "$RUNNER_TEMP/notary.p8" --key-id "$API_KEY_ID" --issuer "$API_ISSUER"
-          xcrun stapler staple dist/AppDoctor-macOS.dmg
+          # Stapling copies Apple's ticket into the .dmg so it opens offline too.
+          # GitHub's Mac runners often lose the connection to Apple's ticket
+          # server, so retry; if it never works the app is still notarized
+          # and macOS fetches the ticket online the first time it opens.
+          for attempt in 1 2 3 4 5 6; do
+            xcrun stapler staple dist/AppDoctor-macOS.dmg && break
+            if [[ $attempt == 6 ]]; then
+              echo "::warning::Couldn't staple the notarization ticket; macOS will fetch it online."
+              break
+            fi
+            sleep 20
+          done
           rm "$RUNNER_TEMP/notary.p8"
       - uses: actions/upload-artifact@v4
         with:
