@@ -82,8 +82,8 @@ impl SettingsView {
             asc_saved: asc.map(|key| (key.issuer_id, key.key_id)),
             asc_busy: false,
             asc_result: None,
-            ads_client_id: cx.new(|cx| input("SEARCHADS.…", &ads_ids.client_id, window, cx)),
-            ads_team_id: cx.new(|cx| input("SEARCHADS.…", &ads_ids.team_id, window, cx)),
+            ads_client_id: cx.new(|cx| input("SEARCHADS.1a2b3c4d-…", &ads_ids.client_id, window, cx)),
+            ads_team_id: cx.new(|cx| input("SEARCHADS.5e6f7a8b-…", &ads_ids.team_id, window, cx)),
             ads_key_id: cx.new(|cx| input("Key ID", &ads_ids.key_id, window, cx)),
             ads_key: ads,
             ads_public_pem,
@@ -722,7 +722,7 @@ impl SettingsView {
                             .line_height(px(15.))
                             .font_family(theme.mono_font_family.clone())
                             .text_color(theme.muted_foreground)
-                            .child(public_pem.clone()),
+                            .child(public_pem.trim_end().to_owned()),
                     )
                     .child(Clipboard::new("copy-ads-public-key").value(public_pem).tooltip("Copy public key")),
                 cx,
