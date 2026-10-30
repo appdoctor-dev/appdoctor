@@ -83,6 +83,7 @@ function Downloads({ size = "lg" }: { size?: "md" | "lg" }) {
 }
 
 function Home() {
+  const release = Route.useLoaderData()
   return (
     <>
       <section className="px-5 pt-16 text-center sm:pt-24">
@@ -98,6 +99,12 @@ function Home() {
           <Downloads />
         </div>
         <p className="mt-5 text-[13px] text-ink-soft">
+          {release && (
+            <a href={release.notes} className="hover:text-ink hover:underline">
+              Version {release.version}
+              {SITE.releaseLabel && ` ${SITE.releaseLabel}`}.{" "}
+            </a>
+          )}
           For Macs with Apple silicon or Intel, and Windows. Your keywords stay on your computer.
         </p>
         <div className="mx-auto mt-16 max-w-[1200px] rounded-[28px] bg-surface p-[clamp(10px,2.6vw,36px)] sm:rounded-[40px]">

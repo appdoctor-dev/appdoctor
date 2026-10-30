@@ -40,7 +40,8 @@ function Download() {
               {release ? (
                 <>
                   <p className="mt-4 text-sm text-ink-soft">
-                    Version {release.version}, {t.file}
+                    Version {release.version}
+                    {SITE.releaseLabel && ` ${SITE.releaseLabel}`}, {t.file}
                   </p>
                   <a href={release[t.key]} className={`${buttonClass("primary")} mt-4`}>
                     Download for {t.label}

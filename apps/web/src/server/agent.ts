@@ -180,7 +180,7 @@ async function downloadMarkdown() {
     "",
     release
       ? [
-          `Version ${release.version}:`,
+          `Version ${release.version}${SITE.releaseLabel ? ` ${SITE.releaseLabel}` : ""}:`,
           "",
           `- [Mac (Apple silicon and Intel, macOS 13 or later)](${release.mac})`,
           `- [Windows (10 or 11, 64-bit)](${release.windows})`,
