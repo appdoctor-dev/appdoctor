@@ -178,3 +178,25 @@ fn what_it_couldnt_check_doesnt_score_well() {
     assert!(report.score < 75, "score {}", report.score);
     assert_eq!(report.findings[0].title, "No ratings yet");
 }
+
+#[test]
+fn no_keywords_scores_below_a_few() {
+    let app = app();
+    let live = live(6, 10);
+    let countries = ["us".to_owned()];
+    let keywords_score = |keywords: &[KeywordRow]| {
+        let report = audit(&Inputs {
+            app: &app,
+            live: Some(&live),
+            listings: &[],
+            keywords,
+            competitors: 0,
+            countries: &countries,
+            designs: Designs::default(),
+            now: NOW,
+        });
+        report.areas.iter().find(|a| a.area == Area::Keywords).unwrap().score
+    };
+    let few = [keyword("sleep", None, 20), keyword("calm", None, 20)];
+    assert!(keywords_score(&[]) < keywords_score(&few));
+}

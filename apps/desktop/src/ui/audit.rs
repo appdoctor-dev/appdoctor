@@ -7,6 +7,8 @@
 //! [`appdoctor_audit::audit`]. *Fix with AI* hands the findings to the
 //! AI chat beside Localization.
 
+use std::collections::{HashMap, HashSet};
+
 use appdoctor_audit::{Designs, Finding, Fix, Inputs, Level, Live, Report, audit, live_key};
 use appdoctor_screenshots::Target;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
@@ -20,34 +22,46 @@ use crate::state::{AppState, Section};
 use crate::theme::meter;
 use crate::ui::{controls, widgets};
 
-pub struct AuditView {
-    state: Entity<AppState>,
-    report: Option<Report>,
-    /// The app the report is for, and when it ran.
-    for_app: Option<u64>,
-    checked_at: i64,
-    running: bool,
+/// One app's audit.
+#[derive(Clone)]
+struct Checked {
+    report: Report,
+    at: i64,
     /// Why the live page couldn't be read, if it couldn't.
     offline: Option<String>,
+}
+
+pub struct AuditView {
+    state: Entity<AppState>,
+    /// Each app's latest audit, so one app never shows another's.
+    checked: HashMap<u64, Checked>,
+    /// Apps being audited now.
+    running: HashSet<u64>,
+    /// Apps audited since Audit was last opened; the rest check again.
+    fresh: HashSet<u64>,
+    /// Whether Audit was showing at the last change, to notice it opening.
+    showing: bool,
     _subscriptions: Vec<Subscription>,
 }
 
 impl AuditView {
     pub fn new(state: Entity<AppState>, cx: &mut Context<Self>) -> Self {
         let subscriptions = vec![cx.observe(&state, |this, state, cx| {
-            if this.for_app.is_some() && this.for_app != state.read(cx).selected_app {
-                this.report = None;
-                this.for_app = None;
+            // Opening Audit checks again: keywords, the listing or the
+            // App Store page may have changed since.
+            let showing = state.read(cx).section == Section::Audit;
+            if showing && !this.showing {
+                this.fresh.clear();
             }
+            this.showing = showing;
             cx.notify();
         })];
         Self {
             state,
-            report: None,
-            for_app: None,
-            checked_at: 0,
-            running: false,
-            offline: None,
+            checked: HashMap::new(),
+            running: HashSet::new(),
+            fresh: HashSet::new(),
+            showing: false,
             _subscriptions: subscriptions,
         }
     }
@@ -59,8 +73,11 @@ impl AuditView {
         };
         let services = state.services.clone();
         let countries = state.countries(app.id);
-        self.running = true;
-        self.for_app = Some(app.id);
+        let app_id = app.id;
+        if !self.running.insert(app_id) {
+            return;
+        }
+        self.fresh.insert(app_id);
         cx.notify();
         let work = runtime::spawn(async move {
             let store = &services.store;
@@ -115,14 +132,17 @@ impl AuditView {
         cx.spawn(async move |this, cx| {
             let result = work.await;
             this.update(cx, |this, cx| {
-                this.running = false;
-                this.checked_at = now();
+                this.running.remove(&app_id);
                 match result {
+                    // Kept for its own app, whichever is showing now.
                     Ok((report, offline)) => {
-                        this.report = Some(report);
-                        this.offline = offline;
+                        this.checked.insert(app_id, Checked { report, at: now(), offline });
                     }
-                    Err(error) => this.offline = Some(format!("{error:#}")),
+                    Err(error) => {
+                        if let Some(checked) = this.checked.get_mut(&app_id) {
+                            checked.offline = Some(format!("{error:#}"));
+                        }
+                    }
                 }
                 cx.notify();
             })
@@ -301,13 +321,15 @@ impl Render for AuditView {
         let Some(app) = self.state.read(cx).selected().cloned() else {
             return widgets::empty_state(IconName::Inbox, "No app selected", "Pick an app in the sidebar.", cx).into_any_element();
         };
-        if self.for_app != Some(app.id) && !self.running {
+        if !self.fresh.contains(&app.id) {
             self.run(cx);
         }
+        let running = self.running.contains(&app.id);
+        let checked = self.checked.get(&app.id).cloned();
         let theme = cx.theme().clone();
-        let subtitle = match (&self.report, self.running) {
+        let subtitle = match (&checked, running) {
             (_, true) => format!("{} · checking…", app.name),
-            (Some(_), false) => format!("{} · checked {}", app.name, widgets::relative_time(self.checked_at, now())),
+            (Some(checked), false) => format!("{} · checked {}", app.name, widgets::relative_time(checked.at, now())),
             (None, false) => app.name.clone(),
         };
         let header = h_flex()
@@ -330,8 +352,8 @@ impl Render for AuditView {
                     .ghost()
                     .icon(IconName::RefreshCw)
                     .label("Check again")
-                    .loading(self.running)
-                    .disabled(self.running)
+                    .loading(running)
+                    .disabled(running)
                     .on_click(cx.listener(|this, _, _, cx| this.run(cx))),
             )
             .child(
@@ -340,11 +362,11 @@ impl Render for AuditView {
                     .primary()
                     .icon(gpui_kit::assets::IconName::Sparkles)
                     .label("Fix with AI")
-                    .disabled(self.report.is_none())
+                    .disabled(checked.is_none())
                     .on_click(cx.listener(|this, _, _, cx| this.fix_with_ai(cx))),
             );
 
-        let Some(report) = self.report.clone() else {
+        let Some(Checked { report, offline, .. }) = checked else {
             return v_flex()
                 .size_full()
                 .child(header)
@@ -380,7 +402,7 @@ impl Render for AuditView {
             .pb(px(40.))
             .gap(px(22.))
             .child(self.summary(&report, cx))
-            .when_some(self.offline.clone(), |this, why| {
+            .when_some(offline, |this, why| {
                 this.child(controls::footnote(
                     format!("Couldn't reach the App Store, so this uses the page as last seen ({why})."),
                     cx,

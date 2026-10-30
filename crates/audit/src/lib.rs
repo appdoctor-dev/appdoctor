@@ -226,6 +226,12 @@ fn chars(text: &Option<String>) -> usize {
     text.as_deref().map_or(0, |t| t.trim().chars().count())
 }
 
+/// "1 rating", "3 ratings".
+fn counted(n: impl Into<u64>, word: &str) -> String {
+    let n = n.into();
+    format!("{n} {word}{}", if n == 1 { "" } else { "s" })
+}
+
 fn list(items: &[String], limit: usize) -> String {
     let shown: Vec<String> = items.iter().take(limit).map(|item| format!("“{item}”")).collect();
     let more = items.len().saturating_sub(limit);
@@ -504,6 +510,8 @@ impl Audit<'_> {
         use Area::Keywords as A;
         let all = self.inputs.keywords;
         if all.is_empty() {
+            // Nothing to judge, which is worse than a few keywords.
+            self.cap(A, 30);
             self.add(
                 A,
                 Level::Critical,
@@ -521,7 +529,7 @@ impl Audit<'_> {
             self.add(
                 A,
                 Level::Warning,
-                format!("Only {} keywords tracked", all.len()),
+                format!("Only {} tracked", counted(all.len() as u64, "keyword")),
                 "Track 15–30 across popular and easier searches to see the whole picture.",
                 Fix::Keywords,
             );
@@ -533,7 +541,7 @@ impl Audit<'_> {
             self.add(
                 A,
                 Level::Warning,
-                format!("{unchecked} keywords never checked"),
+                format!("{} never checked", counted(unchecked as u64, "keyword")),
                 "Run Check ranks to see where you appear for them.",
                 Fix::Keywords,
             );
@@ -659,7 +667,7 @@ impl Audit<'_> {
             Some(count) if count < 4 => self.add(
                 A,
                 Level::Warning,
-                format!("Only {count} screenshots on the App Store"),
+                format!("Only {} on the App Store", counted(count, "screenshot")),
                 "Apple allows 10. Use at least 5 to show what the app does.",
                 Fix::Screenshots,
             ),
@@ -729,7 +737,7 @@ impl Audit<'_> {
             self.add(
                 A,
                 Level::Tip,
-                format!("{count} ratings"),
+                format!("Only {}", counted(count, "rating")),
                 "A few more from happy users go a long way; prompt after a success, not at launch.",
                 Fix::None,
             );
