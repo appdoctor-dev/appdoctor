@@ -250,6 +250,7 @@ dependencies = [
  "appdoctor-asc",
  "appdoctor-entitlement",
  "appdoctor-jwt",
+ "appdoctor-mcp",
  "appdoctor-scoring",
  "appdoctor-screenshots",
  "appdoctor-secrets",
@@ -258,8 +259,8 @@ dependencies = [
  "dirs 7.0.0",
  "futures",
  "gpui-kit",
- "imagesize 0.14.0",
  "reqwest",
+ "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -293,6 +294,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "appdoctor-mcp"
+version = "0.1.0"
+dependencies = [
+ "appdoctor-screenshots",
+ "appdoctor-store",
+ "base64 0.23.1",
+ "serde_json",
+]
+
+[[package]]
 name = "appdoctor-scoring"
 version = "0.1.0"
 
@@ -300,10 +311,13 @@ version = "0.1.0"
 name = "appdoctor-screenshots"
 version = "0.1.0"
 dependencies = [
+ "imagesize 0.14.0",
  "resvg 0.46.0",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+ "ttf-parser",
+ "uuid",
 ]
 
 [[package]]

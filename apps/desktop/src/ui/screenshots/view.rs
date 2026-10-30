@@ -6,8 +6,8 @@ use std::time::Duration;
 
 use appdoctor_screenshots::edit::{Corner, Guide};
 use appdoctor_screenshots::{
-    Align, BASE_HEIGHT, BASE_WIDTH, Background, FONT_FAMILY, LINE_HEIGHT, Layer, LayerKind, Slide, device_geometry,
-    parse_color, visible_layers, wrap,
+    Align, Background, DEFAULT_FONT, LINE_HEIGHT, Layer, LayerKind, Rect, Slide, Target, device_geometry, parse_color,
+    visible_layers,
 };
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, h_flex, v_flex};
@@ -16,6 +16,7 @@ use gpui_kit::*;
 
 use super::{DragMode, ScreenshotsView};
 use crate::theme::meter;
+use crate::ui::controls::Segmented;
 use crate::ui::widgets::{self, status_dot};
 
 const LEFT_PANEL: f32 = 240.;
@@ -23,7 +24,6 @@ pub(super) const RIGHT_PANEL: f32 = 280.;
 const HEADER: f32 = 56.;
 const SIDEBAR: f32 = 236.;
 const TITLE_BAR: f32 = 34.;
-const SLIDE_GAP: f32 = 36.;
 const STAGE_TOP: f32 = 48.;
 const STAGE_BOTTOM: f32 = 92.;
 
@@ -55,9 +55,22 @@ fn background_fill(background: &Background) -> gpui_kit::Background {
 pub(super) fn layer_icon(layer: &Layer) -> Icon {
     match layer.kind {
         LayerKind::Text { .. } => Icon::new(gpui_kit::assets::IconName::Type),
-        LayerKind::Device { .. } => Icon::new(gpui_kit::assets::IconName::Smartphone),
+        LayerKind::Device { model, .. } => Icon::new(match model.target() {
+            Target::Iphone => gpui_kit::assets::IconName::Smartphone,
+            Target::Ipad => gpui_kit::assets::IconName::Tablet,
+        }),
         LayerKind::Image { .. } => Icon::new(gpui_kit::assets::IconName::Image),
         LayerKind::Shape { .. } => Icon::new(IconName::Square),
+    }
+}
+
+/// Slides form one strip: only its two ends are rounded.
+fn strip_corners<E: Styled>(element: E, first: bool, last: bool) -> E {
+    match (first, last) {
+        (true, true) => element.rounded(px(8.)),
+        (true, false) => element.rounded_l(px(8.)),
+        (false, true) => element.rounded_r(px(8.)),
+        (false, false) => element,
     }
 }
 
@@ -76,13 +89,15 @@ fn layer_visual(layer: &Layer, s: f32, folder: &Path) -> AnyElement {
     let (w, h) = (layer.width * s, layer.height * s);
     match &layer.kind {
         LayerKind::Text {
-            text,
             size,
             weight,
             color: c,
             align,
+            font,
+            italic,
+            ..
         } => {
-            let lines = wrap(text, *size, layer.width);
+            let family = SharedString::from(font.clone().unwrap_or_else(|| DEFAULT_FONT.to_owned()));
             v_flex()
                 .w(px(w))
                 .map(|this| match align {
@@ -90,10 +105,11 @@ fn layer_visual(layer: &Layer, s: f32, folder: &Path) -> AnyElement {
                     Align::Center => this.items_center(),
                     Align::Right => this.items_end(),
                 })
-                .children(lines.into_iter().map(|line| {
+                .children(layer.lines().into_iter().map(|line| {
                     div()
                         .whitespace_nowrap()
-                        .font_family(FONT_FAMILY)
+                        .font_family(family.clone())
+                        .when(*italic, |this| this.italic())
                         .text_size(px(size * s))
                         .line_height(px(size * s * LINE_HEIGHT))
                         .font_weight(FontWeight(*weight as f32))
@@ -103,22 +119,26 @@ fn layer_visual(layer: &Layer, s: f32, folder: &Path) -> AnyElement {
                 .into_any_element()
         }
         LayerKind::Device {
+            model,
             frame,
             screenshot,
             shadow,
         } => {
-            let g = device_geometry(layer, *frame);
-            let local = |x: f32, y: f32| (px((x - layer.x) * s), px((y - layer.y) * s));
-            let (sx, sy) = local(g.screen.x, g.screen.y);
-            let screen = div()
-                .absolute()
-                .left(sx)
-                .top(sy)
-                .w(px(g.screen.width * s))
-                .h(px(g.screen.height * s))
-                .rounded(px(g.screen_radius * s))
+            let g = device_geometry(layer, *model, *frame);
+            let glass = color(frame.glass_color(*model));
+            // A part of the device, placed inside the layer's box.
+            let part = |r: Rect, radius: f32| {
+                div()
+                    .absolute()
+                    .left(px((r.x - layer.x) * s))
+                    .top(px((r.y - layer.y) * s))
+                    .w(px(r.width * s))
+                    .h(px(r.height * s))
+                    .rounded(px(radius * s))
+            };
+            let screen = part(g.screen, g.screen_radius)
                 .bg(rgb(0x1c1c1f))
-                .when(*shadow && frame.bezel_color().is_none(), |this| {
+                .when(*shadow && frame.edge_color().is_none(), |this| {
                     this.shadow(drop_shadow(s))
                 })
                 .when_some(screenshot.clone(), |this, file| {
@@ -133,28 +153,40 @@ fn layer_visual(layer: &Layer, s: f32, folder: &Path) -> AnyElement {
                 .relative()
                 .w(px(w))
                 .h(px(h))
-                .when_some(frame.bezel_color(), |this, bezel| {
+                .when_some(frame.button_color(), |this, button| {
+                    this.children(
+                        g.buttons
+                            .iter()
+                            .map(|b| part(*b, b.width.min(b.height) / 2.).bg(color(button))),
+                    )
+                })
+                .when_some(frame.edge_color(), |this, edge| {
                     this.child(
-                        div()
-                            .absolute()
-                            .inset_0()
-                            .rounded(px(g.body_radius * s))
-                            .bg(color(bezel))
+                        part(g.body, g.body_radius)
+                            .bg(color(edge))
                             .when(*shadow, |this| this.shadow(drop_shadow(s))),
                     )
+                    .child(part(g.glass, g.glass_radius).bg(glass))
                 })
                 .child(screen)
                 .when_some(g.island, |this, island| {
-                    let (ix, iy) = local(island.x, island.y);
+                    this.child(part(island, island.height / 2.).bg(rgb(0x000000)))
+                })
+                .when_some(g.notch, |this, notch| {
+                    this.child(part(notch, 0.).rounded_b(px(g.notch_radius * s)).bg(glass))
+                })
+                .when_some(g.speaker, |this, speaker| {
+                    this.child(part(speaker, speaker.height / 2.).bg(rgb(0x2b2b2e)))
+                })
+                .when_some(g.camera, |this, camera| {
+                    this.child(part(camera, camera.width / 2.).bg(rgb(0x16161a)))
+                })
+                .when_some(g.home_button.zip(frame.button_color()), |this, (button, ring)| {
                     this.child(
-                        div()
-                            .absolute()
-                            .left(ix)
-                            .top(iy)
-                            .w(px(island.width * s))
-                            .h(px(island.height * s))
-                            .rounded_full()
-                            .bg(rgb(0x000000)),
+                        part(button, button.width / 2.)
+                            .bg(glass)
+                            .border(px((button.width * 0.05 * s).max(0.5)))
+                            .border_color(color(ring)),
                     )
                 })
                 .into_any_element()
@@ -191,8 +223,9 @@ impl ScreenshotsView {
         let available_h = f32::from(viewport.height) - TITLE_BAR - HEADER - STAGE_TOP - STAGE_BOTTOM - 30.;
         let panels = if self.left_open { LEFT_PANEL } else { 0. } + if self.right_open { RIGHT_PANEL } else { 0. };
         let available_w = f32::from(viewport.width) - SIDEBAR - panels - 120.;
-        let fit = (available_h / BASE_HEIGHT)
-            .min(available_w / BASE_WIDTH * 1.6)
+        let (width, height) = self.target.canvas();
+        let fit = (available_h / height)
+            .min(available_w / width * 1.6)
             .clamp(0.05, 0.4);
         fit * self.zoom
     }
@@ -201,7 +234,8 @@ impl ScreenshotsView {
         let active = index == self.slide;
         // Own layers plus the parts of neighbours' layers that span onto
         // this slide; the slide clips them at its edges, like the export.
-        let visible = visible_layers(&self.design.slides, index);
+        let (canvas_width, canvas_height) = self.target.canvas();
+        let visible = visible_layers(&self.design.slides, index, canvas_width);
         let layers: Vec<AnyElement> = visible
             .iter()
             .map(|(owner, layer)| {
@@ -245,15 +279,32 @@ impl ScreenshotsView {
             })
             .collect();
 
+        // Slides sit edge to edge, as the export cuts them, so a layer
+        // spanning two keeps its true width; only the strip's ends round.
+        let (first, last) = (index == 0, index + 1 == self.design.slides.len());
         let canvas = div()
             .id(("slide-canvas", index))
             .relative()
-            .w(px(BASE_WIDTH * s))
-            .h(px(BASE_HEIGHT * s))
+            .w(px(canvas_width * s))
+            .h(px(canvas_height * s))
             .overflow_hidden()
-            .rounded(px(8.))
+            .map(|this| strip_corners(this, first, last))
             .bg(background_fill(&slide.background))
-            .children(layers);
+            .children(layers)
+            // Where the App Store cuts: a hairline, dark and light so it
+            // shows on any background.
+            .when(!first, |this| {
+                this.child(div().absolute().left_0().top_0().h_full().w(px(1.)).bg(hsla(0., 0., 0., 0.2)))
+                    .child(
+                        div()
+                            .absolute()
+                            .left(px(1.))
+                            .top_0()
+                            .h_full()
+                            .w(px(1.))
+                            .bg(hsla(0., 0., 1., 0.22)),
+                    )
+            });
 
         if !active {
             return v_flex()
@@ -261,10 +312,7 @@ impl ScreenshotsView {
                 .items_center()
                 .child(
                     canvas
-                        .opacity(0.62)
                         .cursor_pointer()
-                        .hover(|style| style.opacity(0.9))
-                        .shadow_md()
                         .on_mouse_down(
                             MouseButton::Left,
                             cx.listener(move |this, _, window, cx| this.select_slide(index, window, cx)),
@@ -325,22 +373,17 @@ impl ScreenshotsView {
                     .relative()
                     .child(
                         canvas
-                            .shadow(vec![
-                                BoxShadow {
-                                    color: selection_color().opacity(0.85),
-                                    offset: point(px(0.), px(0.)),
-                                    blur_radius: px(0.),
-                                    spread_radius: px(2.),
-                                    inset: false,
-                                },
-                                BoxShadow {
-                                    color: hsla(0., 0., 0., 0.4),
-                                    offset: point(px(0.), px(18.)),
-                                    blur_radius: px(48.),
-                                    spread_radius: px(0.),
-                                    inset: false,
-                                },
-                            ])
+                            // The active slide's ring, inside its edges so
+                            // the neighbours don't cover it.
+                            .child(
+                                div()
+                                    .absolute()
+                                    .inset_0()
+                                    .map(|this| strip_corners(this, first, last))
+                                    .border_2()
+                                    .border_color(selection_color().opacity(0.9))
+                                    .with_animation(("active-ring", index), settle, |this, t| this.opacity(t)),
+                            )
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(|this, _, window, cx| {
@@ -351,8 +394,7 @@ impl ScreenshotsView {
                             .children(guides),
                     )
                     .children(hover_outline)
-                    .children(selection)
-                    .with_animation(("active-slide", index), settle, |this, t| this.opacity(0.7 + 0.3 * t)),
+                    .children(selection),
             )
             .child(self.slide_label(index, cx))
             .into_any_element()
@@ -534,8 +576,11 @@ impl ScreenshotsView {
             ))
             .child(self.tool(
                 "tool-device",
-                gpui_kit::assets::IconName::Smartphone,
-                "Phone",
+                match self.target {
+                    Target::Iphone => gpui_kit::assets::IconName::Smartphone,
+                    Target::Ipad => gpui_kit::assets::IconName::Tablet,
+                },
+                self.target.label(),
                 true,
                 cx,
                 Self::add_device,
@@ -833,6 +878,28 @@ impl Render for ScreenshotsView {
                     ))),
             )
             .child(div().flex_1())
+            .child(
+                Segmented::new("design-target", 150.)
+                    .item(
+                        h_flex()
+                            .gap_1()
+                            .child(Icon::new(gpui_kit::assets::IconName::Smartphone).size(px(13.)))
+                            .child("iPhone"),
+                        "iPhone screenshots",
+                    )
+                    .item(
+                        h_flex()
+                            .gap_1()
+                            .child(Icon::new(gpui_kit::assets::IconName::Tablet).size(px(13.)))
+                            .child("iPad"),
+                        "iPad screenshots",
+                    )
+                    .selected(Target::ALL.iter().position(|t| *t == self.target).unwrap_or(0))
+                    .on_select(cx.listener(|this, ix: &usize, window, cx| {
+                        this.set_target(Target::ALL[*ix], window, cx)
+                    })),
+            )
+            .child(div().flex_1())
             .when_some(self.status.clone(), |this, status| {
                 let (c, text) = match status {
                     Ok(text) => (meter::up(), text),
@@ -877,6 +944,15 @@ impl Render for ScreenshotsView {
                         let left = this.left_open;
                         this.set_panels(left, !this.right_open, cx)
                     })),
+            )
+            .child(
+                Button::new("ai-agent")
+                    .ghost()
+                    .small()
+                    .icon(gpui_kit::assets::IconName::Sparkles)
+                    .label("AI agent")
+                    .tooltip("Let your AI agent design these")
+                    .on_click(cx.listener(|this, _, window, cx| this.open_agent_dialog(window, cx))),
             )
             .child(
                 Button::new("export-shots")
@@ -938,7 +1014,7 @@ impl Render for ScreenshotsView {
                     .children(
                         slides
                             .into_iter()
-                            .map(|slide| div().flex_shrink_0().mx(px(SLIDE_GAP / 2.)).child(slide)),
+                            .map(|slide| div().flex_shrink_0().child(slide)),
                     )
                     .child(div().flex_1().flex_shrink_0().min_w(px(40.)).h(px(1.))),
             )

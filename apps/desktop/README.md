@@ -44,7 +44,8 @@ apps/desktop            the `appdoctor` binary: GPUI window, views, app state
 crates/appstore         App Store–native search (MZStore), iTunes Lookup/Search fallback, URL parsing, storefronts, throttle
 crates/store            SQLite (WAL) + migrations: apps, keywords, rank snapshots, popularity, competitors, settings
 crates/scoring          keyword difficulty from the top 10, candidate keywords from metadata (opt-level 3)
-crates/screenshots      screenshot designs: model, SVG layout, PNG render via resvg (opt-level 3)
+crates/screenshots      screenshot designs: model, device frames, font measuring, SVG layout, PNG render via resvg (opt-level 3)
+crates/mcp              `appdoctor mcp`: local stdio MCP server for the user's own AI agent, and one-click setup of AI apps
 crates/jwt              ES256 signing and P-256 key handling for both Apple APIs
 crates/asc              App Store Connect: localizations, builds, build upload, App Review submissions (confirm-gated)
 crates/apple-ads        Apple Ads Platform API 1.0: client secret, token, ACLs, popularity, suggestions
@@ -85,6 +86,30 @@ while the App Store's own search didn't have it in its 249 results.
 Each snapshot records the source that answered, and "change" compares only
 checks from the same source. The storefront ID table is cross-checked against
 the open-source app-store-scraper.
+
+**MCP server** (`crates/mcp`). `appdoctor mcp` runs the same binary as a
+JSON-RPC server on stdin and stdout, with no window and no network. Today it
+has 14 screenshot design tools:
+- reading: `list_apps`, `get_design`, `design_options`, `list_fonts`;
+- editing: `add_slide`, `delete_slide`, `move_slide`, `set_background`,
+  `add_layer`, `update_layer`, `delete_layer`, `arrange_layer`;
+- output: `render_slide`, which returns a PNG the agent can look at, and
+  `export_screenshots`.
+
+Each call reads the design file, changes it and writes it back atomically.
+The editor checks the file every 0.7 s. It takes in changes it didn't write
+as one undoable step, and it skips its own save if the file changed
+underneath it, so an agent's edit is never overwritten.
+
+*AI agent* in the Screenshots header finds the AI apps installed on this
+computer: Claude, Claude Code, Cursor, VS Code, Windsurf, Codex, Gemini CLI,
+Antigravity and LM Studio.
+- *Connect all* adds an `appdoctor` entry to each app's MCP settings file.
+  The rest of the file is kept, including its key order, and the first change
+  saves a `.before-appdoctor` copy beside it.
+- Files that aren't plain JSON (JSONC with comments) are left alone and
+  marked "Set up by hand".
+- An entry pointing at another copy of AppDoctor shows *Update*.
 
 **Network endpoints.** The app talks only to Apple (`search.itunes.apple.com`, `itunes.apple.com`, the
 `mzstatic.com` icon CDN, `api.appstoreconnect.apple.com`,
@@ -131,10 +156,26 @@ Every section in the sidebar is a page of this one window.
     Store Connect.
   - **Not yet run against a real account.**
 - **Screenshots.** A layer editor for App Store screenshots, inside the app.
-  - Every screenshot sits side by side on one stage. Each has a background
-    (gradient presets, or your own gradient or solid colour) and a stack of
-    layers: text, iPhone (black, silver or no frame, holding your
-    screenshot), image and shape.
+  - iPhone and iPad designs, switched in the header. iPhone uses a
+    1320×2868 canvas and exports 6.9" and 6.5". iPad uses 2064×2752 and
+    exports 13" (2064×2752) and 12.9" (2048×2732). Each has its own file.
+  - The screenshots sit edge to edge on one stage, as the export cuts them,
+    with a hairline at each cut. Each has a background (gradient presets, or
+    your own gradient or solid colour) and a stack of layers: text, device,
+    image and shape.
+  - Devices hold your screenshot. There are five models, all drawn from
+    proportions rather than Apple artwork:
+    - iPhone with Dynamic Island, with notch, or with home button;
+    - iPad Pro, or iPad with home button.
+
+    Each has side buttons and a camera, and comes in eight finishes (Black,
+    Silver, Titanium, Gold, Blue, Orange, Pink and a matte Clay) or with no
+    frame.
+  - Text uses any installed font: a searchable picker shows each one in its
+    own typeface, with suggested ones first. Text can be italic. Lines wrap
+    using the font's real glyph widths (ttf-parser through fontdb, the same
+    fonts resvg renders), so the canvas and the export break lines in the
+    same places.
   - Drag a layer to move it; it snaps to the canvas and to other layers
     (hold ⌥ to skip snapping). Drag a corner to resize it; phones keep their
     shape, and ⇧ keeps any layer's. You can also type X, Y, W and H.
@@ -147,15 +188,22 @@ Every section in the sidebar is a page of this one window.
   - Shortcuts: ⌘Z / ⇧⌘Z to undo and redo (100 steps), ⌘D to duplicate,
     ⌘] / ⌘[ to bring forward or send back, ⌫ to delete, the arrow keys to
     nudge (⇧ for 10), and Esc to deselect.
-  - *Export PNGs* writes every screenshot at 6.9" (1320×2868) and 6.5"
-    (1242×2688), rendered with resvg.
+  - *Export PNGs* writes every screenshot at both sizes for the design's
+    device, rendered with resvg.
   - Designs save automatically per app in
-    `<data folder>/screenshots/<app id>/design.json`. Designs from the first
-    version, with one headline, subheadline and device per slide, are
-    upgraded on load.
-  - Checked by hand with demo data: selecting, the text inspector, the
-    segmented controls and the panel toggles. Dragging across screenshots is
-    unit-tested but hasn't been tried by hand yet.
+    `<data folder>/screenshots/<app id>/design.json` (iPad:
+    `design-ipad.json`). Designs from the first version, with one headline,
+    subheadline and device per slide, are upgraded on load.
+  - *AI agent* connects your own AI app; see "MCP server" above. Its edits
+    show up live and undo with ⌘Z.
+  - Checked by hand with demo data:
+    - the device model, finish and frame controls;
+    - the iPhone/iPad switch;
+    - a phone spanning two screenshots;
+    - an agent's font and text edits appearing live through `appdoctor mcp`;
+    - *Connect all* against a test home folder.
+
+    The font picker's dropdown hasn't been opened by hand.
 - **App Review** (Ship → App Review).
   - It loads the editable iOS version, the app's builds and its review
     submissions from App Store Connect.
@@ -177,9 +225,9 @@ Planned, also as sections of this window:
 - **Review analysis** for your apps and competitors.
 - **AI help in the screenshot designer.** One prompt sets the background,
   copy and device layout, through the user's own AI provider.
-- **Local MCP server** (`crates/mcp`, localhost only), so the user's own agent
-  can drive AppDoctor. For example, "localize my app into these languages"
-  writes through `crates/asc`.
+- **More MCP tools.** Keywords, rankings, localization ("localize my app into
+  these languages" through `crates/asc`) and the confirm-gated App Review
+  tools below.
 - **Bring-your-own AI provider or Ollama.**
 
 ## App Review and uploads

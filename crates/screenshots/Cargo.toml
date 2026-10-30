@@ -7,8 +7,12 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+imagesize = "0.14.0"
 # Same version and features gpui already builds, so this adds no new crates.
 resvg = { version = "0.46.0", features = ["text", "system-fonts", "memmap-fonts", "raster-images"] }
 serde.workspace = true
+# Already in the tree through resvg's fontdb; reads advances for wrapping.
+ttf-parser = "0.25.1"
 serde_json.workspace = true
 thiserror.workspace = true
+uuid.workspace = true

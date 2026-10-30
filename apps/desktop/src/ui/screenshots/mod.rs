@@ -4,9 +4,14 @@
 //! The canvas is drawn natively by GPUI from the design (no image round
 //! trip), so dragging and typing stay at frame rate. Export renders the
 //! same layers through `appdoctor_screenshots` with the same geometry.
-//! Designs live in the data folder: `screenshots/<app id>/design.json`
-//! beside the images they use.
+//! Designs live in the data folder: `screenshots/<app id>/design.json` for
+//! iPhone and `design-ipad.json` for iPad, beside the images they use.
+//!
+//! An AI agent can edit the same files through `appdoctor mcp`; the view
+//! watches the file and takes in changes it didn't write, as an undoable
+//! step.
 
+mod agent;
 mod inspector;
 mod view;
 
@@ -16,9 +21,11 @@ use std::time::{Duration, Instant};
 
 use appdoctor_screenshots::edit::{Corner, Guide, resize, snap_move};
 use appdoctor_screenshots::{
-    Align, BASE_HEIGHT, BASE_WIDTH, Background, CanvasSize, Design, Frame, Layer, LayerKind, Rect, Slide, render_png,
+    Align, Background, CanvasSize, DEFAULT_FONT, Design, DeviceModel, Frame, Layer, LayerKind, Rect, SUGGESTED_FONTS,
+    Slide, Target, font_families, import_image, render_png, write_atomic,
 };
 use gpui_kit::component::input::{InputEvent, InputState, TextareaState};
+use gpui_kit::component::select::{SearchableVec, SelectEvent, SelectItem, SelectState};
 use gpui_kit::component::slider::{SliderEvent, SliderState};
 use gpui_kit::*;
 
@@ -31,6 +38,48 @@ const COALESCE: Duration = Duration::from_millis(700);
 /// Snapping distance in screen pixels.
 const SNAP_PX: f32 = 7.;
 const THUMB_SCALE: f32 = 0.08;
+/// How often the design file is checked for an agent's edits.
+const WATCH: Duration = Duration::from_millis(700);
+
+/// A font family in the picker, drawn in its own typeface.
+#[derive(Clone)]
+struct FontItem {
+    name: SharedString,
+}
+
+impl SelectItem for FontItem {
+    type Value = SharedString;
+
+    fn title(&self) -> SharedString {
+        self.name.clone()
+    }
+
+    fn display_title(&self) -> Option<AnyElement> {
+        Some(div().font_family(self.name.clone()).child(self.name.clone()).into_any_element())
+    }
+
+    fn render(&self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        div().font_family(self.name.clone()).child(self.name.clone())
+    }
+
+    fn value(&self) -> &SharedString {
+        &self.name
+    }
+}
+
+type FontSelect = SelectState<SearchableVec<FontItem>>;
+
+/// The installed fonts, suggested ones first.
+fn font_items() -> Vec<FontItem> {
+    let all = font_families();
+    let mut names: Vec<String> = SUGGESTED_FONTS
+        .iter()
+        .filter(|name| all.iter().any(|family| family == *name))
+        .map(|name| (*name).to_owned())
+        .collect();
+    names.extend(all.into_iter().filter(|family| !SUGGESTED_FONTS.contains(&family.as_str())));
+    names.into_iter().map(|name| FontItem { name: name.into() }).collect()
+}
 
 #[derive(Clone, Copy)]
 enum DragMode {
@@ -67,7 +116,12 @@ pub struct ScreenshotsView {
     state: Entity<AppState>,
     focus: FocusHandle,
     app_id: Option<u64>,
+    /// iPhone or iPad: which of the app's designs is open.
+    target: Target,
     design: Design,
+    /// The design file's bytes as last read or written here; anything else
+    /// on disk was written by someone else (an agent).
+    last_disk: Vec<u8>,
     next_id: u64,
     slide: usize,
     selected: Option<u64>,
@@ -92,12 +146,14 @@ pub struct ScreenshotsView {
     thumbs: Vec<Option<Arc<Image>>>,
     inputs: Inputs,
     sliders: Sliders,
+    fonts: Entity<FontSelect>,
     /// While controls are filled from the selection, their events aren't edits.
     syncing: bool,
     status: Option<Result<String, String>>,
     exporting: bool,
     _save: Option<Task<()>>,
     _thumbs: Option<Task<()>>,
+    _watch: Task<()>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -123,7 +179,36 @@ impl ScreenshotsView {
             radius: slider(0., 300., cx),
         };
 
-        let mut subscriptions = vec![cx.observe_in(&state, window, |this, _, window, cx| this.follow_app(window, cx))];
+        let fonts = cx.new(|cx| FontSelect::new(SearchableVec::new(Vec::new()), None, window, cx).searchable(true));
+        cx.spawn_in(window, async move |this, cx| {
+            let items = cx.background_spawn(async { font_items() }).await;
+            this.update_in(cx, |this, window, cx| {
+                this.fonts
+                    .update(cx, |select, cx| select.set_items(SearchableVec::new(items), window, cx));
+                this.sync_font(window, cx);
+            })
+            .ok();
+        })
+        .detach();
+        let watch = cx.spawn_in(window, async move |this, cx| {
+            loop {
+                cx.background_executor().timer(WATCH).await;
+                if this.update_in(cx, |this, window, cx| this.check_disk(window, cx)).is_err() {
+                    break;
+                }
+            }
+        });
+
+        let mut subscriptions = vec![
+            cx.observe_in(&state, window, |this, _, window, cx| this.follow_app(window, cx)),
+            cx.subscribe_in(&fonts, window, |this, _, event: &SelectEvent<_>, window, cx| {
+                if let SelectEvent::Confirm(Some(name)) = event
+                    && !this.syncing
+                {
+                    this.set_font(name.to_string(), window, cx);
+                }
+            }),
+        ];
         subscriptions.push(cx.subscribe(&inputs.text, |this, _, event: &InputEvent, cx| {
             if matches!(event, InputEvent::Change) && !this.syncing {
                 let text = this.inputs.text.read(cx).value().to_string();
@@ -227,7 +312,9 @@ impl ScreenshotsView {
             state,
             focus: cx.focus_handle(),
             app_id: None,
+            target: Target::Iphone,
             design: Design::default(),
+            last_disk: Vec::new(),
             next_id: 0,
             slide: 0,
             selected: None,
@@ -248,11 +335,13 @@ impl ScreenshotsView {
             thumbs: Vec::new(),
             inputs,
             sliders,
+            fonts,
             syncing: false,
             status: None,
             exporting: false,
             _save: None,
             _thumbs: None,
+            _watch: watch,
             _subscriptions: subscriptions,
         };
         this.follow_app(window, cx);
@@ -273,21 +362,52 @@ impl ScreenshotsView {
         )
     }
 
+    fn design_path(&self, cx: &App) -> Option<PathBuf> {
+        Some(self.folder(cx)?.join(self.target.file_name()))
+    }
+
     fn follow_app(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let state = self.state.read(cx);
-        let selected = state.selected_app;
-        if selected == self.app_id {
+        if self.state.read(cx).selected_app == self.app_id {
             return;
         }
-        let app_name = state.selected().map(|app| app.name.clone()).unwrap_or_default();
-        self.app_id = selected;
+        self.flush(cx);
+        self.app_id = self.state.read(cx).selected_app;
+        self.load(window, cx);
+    }
+
+    /// Switches between the app's iPhone and iPad designs.
+    fn set_target(&mut self, target: Target, window: &mut Window, cx: &mut Context<Self>) {
+        if target != self.target {
+            self.flush(cx);
+            self.target = target;
+            self.load(window, cx);
+        }
+    }
+
+    /// Opens the selected app's design for the current target, starting
+    /// one if there's none yet.
+    fn load(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let app_name = self
+            .state
+            .read(cx)
+            .selected()
+            .map(|app| app.name.clone())
+            .unwrap_or_default();
+        let target = self.target;
         self.design = match self.folder(cx) {
-            Some(folder) => Design::load(&folder.join("design.json")),
-            None => Design::default(),
+            Some(folder) => Design::load_for(&folder, target),
+            None => Design {
+                target,
+                ..Design::default()
+            },
         };
+        self.last_disk = self
+            .design_path(cx)
+            .and_then(|path| std::fs::read(path).ok())
+            .unwrap_or_default();
         self.next_id = self.design.max_id();
-        if self.design.slides.is_empty() && selected.is_some() {
-            let slide = Slide::starter(&app_name, &mut self.next_id);
+        if self.design.slides.is_empty() && self.app_id.is_some() {
+            let slide = Slide::starter(target, &app_name, &mut self.next_id);
             self.design.slides.push(slide);
         }
         self.slide = 0;
@@ -295,6 +415,7 @@ impl ScreenshotsView {
         self.undo.clear();
         self.redo.clear();
         self.status = None;
+        self.thumbs.clear();
         self.sync_controls(window, cx);
         self.render_thumbs(cx);
         cx.notify();
@@ -302,13 +423,15 @@ impl ScreenshotsView {
 
     /// Saves and refreshes the edited slide's thumbnail shortly after edits stop.
     fn changed(&mut self, cx: &mut Context<Self>) {
-        let (Some(folder), design) = (self.folder(cx), self.design.clone()) else {
+        if self.folder(cx).is_none() {
             return;
-        };
+        }
         self._save = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(Duration::from_millis(350)).await;
-            let save_path = folder.join("design.json");
-            let result = cx.background_spawn(async move { design.save(&save_path) }).await;
+            let Ok(Some((path, bytes))) = this.update(cx, |this, cx| this.prepare_save(cx)) else {
+                return;
+            };
+            let result = cx.background_spawn(async move { write_atomic(&path, &bytes) }).await;
             this.update(cx, |this, cx| {
                 if let Err(error) = result {
                     this.status = Some(Err(format!("Couldn't save the design: {error}")));
@@ -320,6 +443,71 @@ impl ScreenshotsView {
         cx.notify();
     }
 
+    /// The path and bytes to save, noted as this view's own so the watcher
+    /// doesn't take them for an agent's. `None` when the file changed on
+    /// disk since it was last read: the watcher takes that in first, so an
+    /// agent's edit is never overwritten.
+    fn prepare_save(&mut self, cx: &App) -> Option<(PathBuf, Vec<u8>)> {
+        let path = self.design_path(cx)?;
+        if !self.last_disk.is_empty()
+            && let Ok(disk) = std::fs::read(&path)
+            && disk != self.last_disk
+        {
+            return None;
+        }
+        let bytes = self.design.to_json();
+        self.last_disk = bytes.clone();
+        Some((path, bytes))
+    }
+
+    /// Writes a pending save now, before another design replaces this one.
+    fn flush(&mut self, cx: &mut Context<Self>) {
+        if self._save.take().is_some()
+            && let Some((path, bytes)) = self.prepare_save(cx)
+            && let Err(error) = write_atomic(&path, &bytes)
+        {
+            tracing::warn!(%error, "couldn't save the design");
+        }
+    }
+
+    /// Takes in edits made to the design file elsewhere (by an agent through
+    /// `appdoctor mcp`) as one undoable step.
+    fn check_disk(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.drag.is_some() {
+            return;
+        }
+        let Some(path) = self.design_path(cx) else {
+            return;
+        };
+        let Ok(bytes) = std::fs::read(&path) else {
+            return;
+        };
+        if bytes == self.last_disk {
+            return;
+        }
+        let Some(disk) = Design::from_json(&bytes) else {
+            return;
+        };
+        self.last_disk = bytes;
+        if disk.slides == self.design.slides {
+            return;
+        }
+        self._save = None;
+        self.checkpoint();
+        self.design.slides = disk.slides;
+        self.next_id = self.next_id.max(self.design.max_id());
+        self.slide = self.slide.min(self.design.slides.len().saturating_sub(1));
+        if self.selected.is_some_and(|id| self.layer(id).is_none()) {
+            self.selected = None;
+        }
+        self.last_edit = Instant::now() - COALESCE;
+        self.status = Some(Ok("Updated by your AI agent. ⌘Z undoes it.".into()));
+        self.sync_controls(window, cx);
+        self.thumbs.clear();
+        self.render_thumbs(cx);
+        cx.notify();
+    }
+
     /// Re-renders the thumbnails. All of them: a layer spanning two slides
     /// changes both.
     fn render_thumbs(&mut self, cx: &mut Context<Self>) {
@@ -328,11 +516,12 @@ impl ScreenshotsView {
         };
         self.thumbs.resize(self.design.slides.len(), None);
         let slides = self.design.slides.clone();
+        let size = self.target.sizes()[0];
         self._thumbs = Some(cx.spawn(async move |this, cx| {
             let rendered = cx
                 .background_spawn(async move {
                     (0..slides.len())
-                        .map(|ix| render_thumb(&slides, ix, &folder))
+                        .map(|ix| render_thumb(&slides, ix, size, &folder))
                         .collect::<Vec<_>>()
                 })
                 .await;
@@ -475,6 +664,7 @@ impl ScreenshotsView {
             match &layer.kind {
                 LayerKind::Text { text, size, color, .. } => {
                     let text = text.clone();
+                    self.sync_font(window, cx);
                     self.inputs.text.update(cx, |area, cx| area.set_value(text, window, cx));
                     set(&self.inputs.color, color.clone(), window, cx);
                     set_slider(&self.sliders.size, *size, window, cx);
@@ -496,6 +686,19 @@ impl ScreenshotsView {
             set(&self.inputs.to, to, window, cx);
         }
         self.syncing = false;
+    }
+
+    /// Shows the selected text layer's font in the picker.
+    fn sync_font(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let font = match self.selected_layer().map(|layer| &layer.kind) {
+            Some(LayerKind::Text { font, .. }) => font.clone().unwrap_or_else(|| DEFAULT_FONT.into()),
+            _ => return,
+        };
+        let syncing = std::mem::replace(&mut self.syncing, true);
+        self.fonts.update(cx, |select, cx| {
+            select.set_selected_value(&SharedString::from(font), window, cx)
+        });
+        self.syncing = syncing;
     }
 
     /// Fills X/Y/W/H from the selection, leaving alone the one being typed in.
@@ -527,14 +730,16 @@ impl ScreenshotsView {
 
     fn add_text(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let id = self.mint_id();
-        let layer = Layer::text(id, "New text", BASE_HEIGHT * 0.42, 88., 700, "#ffffff");
+        let (canvas_width, canvas_height) = self.target.canvas();
+        let size = 88. * canvas_width / 1320.;
+        let layer = Layer::text(self.target, id, "New text", canvas_height * 0.42, size, 700, "#ffffff");
         self.add_layer(layer, window, cx);
         self.inputs.text.update(cx, |area, cx| area.focus(window, cx));
     }
 
     fn add_device(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let id = self.mint_id();
-        let mut layer = Layer::device(id, 640.);
+        let mut layer = Layer::device(self.target, id, self.target.canvas().1 * 0.2);
         let count = self
             .current()
             .map_or(0, |s| s.layers.iter().filter(|l| l.label() == "Device").count());
@@ -553,7 +758,7 @@ impl ScreenshotsView {
 
     fn add_shape(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let id = self.mint_id();
-        self.add_layer(Layer::shape(id), window, cx);
+        self.add_layer(Layer::shape(self.target, id), window, cx);
     }
 
     fn pick_image(
@@ -594,10 +799,10 @@ impl ScreenshotsView {
     fn add_image(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.pick_image(window, cx, |this, name, (w, h), window, cx| {
             // Fit into 60% of the canvas width, keeping the image's shape.
-            let width = (BASE_WIDTH * 0.6).min(w.max(1.));
+            let width = (this.target.canvas().0 * 0.6).min(w.max(1.));
             let height = width * h / w.max(1.);
             let id = this.mint_id();
-            this.add_layer(Layer::image(id, name, width, height), window, cx);
+            this.add_layer(Layer::image(this.target, id, name, width, height), window, cx);
         });
     }
 
@@ -747,7 +952,7 @@ impl ScreenshotsView {
             let mut copy = self
                 .current()
                 .cloned()
-                .unwrap_or_else(|| Slide::starter("", &mut self.next_id));
+                .unwrap_or_else(|| Slide::starter(self.target, "", &mut self.next_id));
             for layer in &mut copy.layers {
                 layer.id = {
                     self.next_id += 1;
@@ -756,7 +961,7 @@ impl ScreenshotsView {
             }
             copy
         } else {
-            let mut slide = Slide::starter("Another great reason", &mut self.next_id);
+            let mut slide = Slide::starter(self.target, "Another great reason", &mut self.next_id);
             if let Some(background) = self.current().map(|s| s.background.clone()) {
                 slide.background = background;
             }
@@ -852,7 +1057,14 @@ impl ScreenshotsView {
                 },
                 Vec::new(),
             ),
-            DragMode::Move => snap_move(drag.start, dx, dy, &others, SNAP_PX / drag.scale),
+            DragMode::Move => snap_move(
+                drag.start,
+                dx,
+                dy,
+                self.target.canvas(),
+                &others,
+                SNAP_PX / drag.scale,
+            ),
             DragMode::Resize(corner) => (
                 resize(drag.start, corner, dx, dy, keeps_aspect || modifiers.shift),
                 Vec::new(),
@@ -885,8 +1097,9 @@ impl ScreenshotsView {
         let Some(layer) = self.layer(id).cloned() else {
             return;
         };
+        let width = self.target.canvas().0;
         let centre = layer.x + layer.width / 2.;
-        let steps = (centre / BASE_WIDTH).floor() as isize;
+        let steps = (centre / width).floor() as isize;
         if steps == 0 {
             return;
         }
@@ -899,7 +1112,7 @@ impl ScreenshotsView {
             slide.layers.retain(|l| l.id != id);
         }
         let mut moved = layer;
-        moved.x -= steps as f32 * BASE_WIDTH;
+        moved.x -= steps as f32 * width;
         self.design.slides[target].layers.push(moved);
         self.slide = target;
         self.stage_scroll.scroll_to_item(target + 1);
@@ -986,6 +1199,7 @@ impl ScreenshotsView {
             prompt: Some("Export Here".into()),
         });
         let slides = self.design.slides.clone();
+        let sizes = self.target.sizes();
         cx.spawn_in(window, async move |this, cx| {
             let Ok(Ok(Some(paths))) = paths.await else {
                 return;
@@ -1002,9 +1216,9 @@ impl ScreenshotsView {
             let result = cx
                 .background_spawn(async move {
                     let mut written = 0;
-                    for size in CanvasSize::ALL {
+                    for size in sizes {
                         for index in 0..slides.len() {
-                            let png = render_png(&slides, index, size, &folder, 1.0).map_err(|e| e.to_string())?;
+                            let png = render_png(&slides, index, *size, &folder, 1.0).map_err(|e| e.to_string())?;
                             let name = format!("{:02}-{}.png", index + 1, size.slug());
                             std::fs::write(destination.join(name), png).map_err(|e| e.to_string())?;
                             written += 1;
@@ -1030,6 +1244,8 @@ impl ScreenshotsView {
             if let LayerKind::Text { weight: w, .. } = &mut layer.kind {
                 *w = weight;
             }
+            // Heavier type is wider, so the lines may change.
+            layer.fit_text();
         });
     }
 
@@ -1046,6 +1262,39 @@ impl ScreenshotsView {
             if let LayerKind::Device { frame: f, .. } = &mut layer.kind {
                 *f = frame;
             }
+        });
+    }
+
+    /// Changes a device's model. The width stays; the height follows the
+    /// new shape.
+    fn set_model(&mut self, model: DeviceModel, window: &mut Window, cx: &mut Context<Self>) {
+        self.apply_to_selected(window, cx, |layer| {
+            if let LayerKind::Device { model: current, .. } = &mut layer.kind {
+                if layer.name == current.target().label() {
+                    layer.name = model.target().label().into();
+                }
+                *current = model;
+                layer.height = layer.width * model.aspect();
+            }
+        });
+    }
+
+    fn set_font(&mut self, font: String, window: &mut Window, cx: &mut Context<Self>) {
+        let font = (font != DEFAULT_FONT).then_some(font);
+        self.apply_to_selected(window, cx, |layer| {
+            if let LayerKind::Text { font: current, .. } = &mut layer.kind {
+                *current = font;
+            }
+            layer.fit_text();
+        });
+    }
+
+    fn toggle_italic(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.apply_to_selected(window, cx, |layer| {
+            if let LayerKind::Text { italic, .. } = &mut layer.kind {
+                *italic = !*italic;
+            }
+            layer.fit_text();
         });
     }
 
@@ -1085,28 +1334,12 @@ impl ScreenshotsView {
     }
 }
 
-fn render_thumb(slides: &[Slide], index: usize, folder: &Path) -> Option<Arc<Image>> {
-    match render_png(slides, index, CanvasSize::Iphone69, folder, THUMB_SCALE) {
+fn render_thumb(slides: &[Slide], index: usize, size: CanvasSize, folder: &Path) -> Option<Arc<Image>> {
+    match render_png(slides, index, size, folder, THUMB_SCALE) {
         Ok(png) => Some(Arc::new(Image::from_bytes(ImageFormat::Png, png))),
         Err(error) => {
             tracing::warn!(%error, "thumbnail render failed");
             None
         }
     }
-}
-
-/// Copies an image into the design folder under a fresh name; returns the
-/// name and the image's pixel size.
-fn import_image(source: &Path, folder: &Path) -> std::io::Result<(String, (f32, f32))> {
-    let extension = source
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(str::to_ascii_lowercase)
-        .filter(|e| matches!(e.as_str(), "png" | "jpg" | "jpeg" | "webp"))
-        .ok_or_else(|| std::io::Error::other("choose a PNG, JPEG or WebP image"))?;
-    let size = imagesize::size(source).map_err(std::io::Error::other)?;
-    std::fs::create_dir_all(folder)?;
-    let name = format!("img-{}.{extension}", uuid::Uuid::new_v4().simple());
-    std::fs::copy(source, folder.join(&name))?;
-    Ok((name, (size.width as f32, size.height as f32)))
 }

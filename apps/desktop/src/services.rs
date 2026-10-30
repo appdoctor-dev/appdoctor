@@ -23,15 +23,20 @@ pub struct Services {
 const DEVICE_ID: &str = "device_id";
 const API_BASE: &str = "api_base";
 
+/// Where AppDoctor keeps its data: `APPDOCTOR_DATA_DIR`, else the OS data
+/// dir (`~/Library/Application Support/AppDoctor` on macOS,
+/// `%APPDATA%\AppDoctor` on Windows). `appdoctor mcp` uses the same one.
+pub fn data_dir() -> anyhow::Result<PathBuf> {
+    std::env::var_os("APPDOCTOR_DATA_DIR")
+        .map(PathBuf::from)
+        .or_else(|| dirs::data_dir().map(|dir| dir.join("AppDoctor")))
+        .context("no data directory on this system")
+}
+
 impl Services {
-    /// Opens the data directory (`APPDOCTOR_DATA_DIR`, else the OS data
-    /// dir: `~/Library/Application Support/AppDoctor` on macOS,
-    /// `%APPDATA%\AppDoctor` on Windows) and the database in it.
+    /// Opens the data directory ([`data_dir`]) and the database in it.
     pub fn open() -> anyhow::Result<Arc<Self>> {
-        let data_dir = std::env::var_os("APPDOCTOR_DATA_DIR")
-            .map(PathBuf::from)
-            .or_else(|| dirs::data_dir().map(|dir| dir.join("AppDoctor")))
-            .context("no data directory on this system")?;
+        let data_dir = data_dir()?;
         let store = Store::open(&data_dir.join("appdoctor.db")).context("opening the database")?;
         let device_id = match store.setting(DEVICE_ID)? {
             Some(id) => id,

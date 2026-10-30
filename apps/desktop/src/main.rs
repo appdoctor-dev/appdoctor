@@ -22,11 +22,22 @@ use gpui_kit::*;
 actions!(appdoctor, [Quit]);
 
 fn main() {
+    // stdout belongs to the MCP protocol in `appdoctor mcp`; logs go to stderr.
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "appdoctor=info,warn".into()),
         )
+        .with_writer(std::io::stderr)
         .init();
+
+    if std::env::args().nth(1).as_deref() == Some("mcp") {
+        serve_mcp();
+        return;
+    }
+
+    // Text layers measure with the system fonts; scanning them takes a
+    // moment, so it happens before anyone opens the screenshot designer.
+    std::thread::spawn(appdoctor_screenshots::warm_fonts);
 
     runtime::init();
     let services = match services::Services::open() {
@@ -80,4 +91,22 @@ fn main() {
         state.update(cx, |state, cx| state.start(cx));
         cx.activate(true);
     });
+}
+
+/// `appdoctor mcp`: the local MCP server for the user's own AI agent, over
+/// stdin and stdout. No window, and no network.
+fn serve_mcp() {
+    let data_dir = match services::data_dir() {
+        Ok(dir) => dir,
+        Err(error) => {
+            eprintln!("AppDoctor couldn't find its data: {error:#}");
+            std::process::exit(1);
+        }
+    };
+    tracing::info!(data_dir = %data_dir.display(), "serving MCP on stdio");
+    let server = appdoctor_mcp::Server::new(data_dir);
+    if let Err(error) = server.serve(std::io::stdin().lock(), std::io::stdout().lock()) {
+        eprintln!("AppDoctor's MCP server stopped: {error}");
+        std::process::exit(1);
+    }
 }

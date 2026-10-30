@@ -1,21 +1,36 @@
-//! Renders a starter slide to a PNG, for checking layout by eye:
-//! `cargo run -p appdoctor-screenshots --example render -- <out.png> [screenshot.png]`
+//! Renders every device model in a few finishes to PNGs, for checking the
+//! frames by eye:
+//! `cargo run -p appdoctor-screenshots --example render -- <out dir> [screenshot.png]`
 use std::path::PathBuf;
 
-use appdoctor_screenshots::{CanvasSize, LayerKind, Slide, render_png};
+use appdoctor_screenshots::{DeviceModel, Frame, LayerKind, Slide, render_png};
 
 fn main() {
     let mut args = std::env::args().skip(1);
-    let out = PathBuf::from(args.next().expect("usage: render <out.png> [screenshot.png]"));
-    let mut id = 0;
-    let mut slide = Slide::starter("Plan your day in seconds", &mut id);
-    let mut dir = std::env::temp_dir();
-    if let Some(shot) = args.next().map(PathBuf::from) {
-        dir = shot.parent().unwrap().to_path_buf();
-        if let LayerKind::Device { screenshot, .. } = &mut slide.layers[2].kind {
-            *screenshot = Some(shot.file_name().unwrap().to_string_lossy().into_owned());
+    let out = PathBuf::from(args.next().expect("usage: render <out dir> [screenshot.png]"));
+    std::fs::create_dir_all(&out).expect("out dir");
+    let shot = args.next().map(PathBuf::from);
+    let dir = shot
+        .as_ref()
+        .and_then(|shot| shot.parent().map(PathBuf::from))
+        .unwrap_or_else(std::env::temp_dir);
+    for model in DeviceModel::ALL {
+        for frame in [Frame::Black, Frame::Silver, Frame::Orange, Frame::Clay, Frame::None] {
+            let mut id = 0;
+            let mut slide = Slide::starter(model.target(), "Plan your day in seconds", &mut id);
+            let device = &mut slide.layers[2];
+            device.height = device.width * model.aspect();
+            device.kind = LayerKind::Device {
+                model,
+                frame,
+                screenshot: shot
+                    .as_ref()
+                    .map(|shot| shot.file_name().unwrap().to_string_lossy().into_owned()),
+                shadow: true,
+            };
+            let size = model.target().sizes()[0];
+            let png = render_png(std::slice::from_ref(&slide), 0, size, &dir, 0.35).expect("render");
+            std::fs::write(out.join(format!("{}-{}.png", model.slug(), frame.slug())), png).expect("write");
         }
     }
-    let png = render_png(std::slice::from_ref(&slide), 0, CanvasSize::Iphone69, &dir, 0.5).expect("render");
-    std::fs::write(&out, png).expect("write");
 }

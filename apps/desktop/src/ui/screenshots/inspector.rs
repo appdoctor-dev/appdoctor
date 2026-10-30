@@ -1,9 +1,10 @@
 //! The right-hand inspector: the selected layer's properties, or the
 //! screenshot's background when nothing is selected.
 
-use appdoctor_screenshots::{Align, BASE_HEIGHT, BASE_WIDTH, Background, CanvasSize, Frame, Layer, LayerKind};
+use appdoctor_screenshots::{Align, BACKGROUND_PRESETS, Background, DeviceModel, Frame, Layer, LayerKind};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputState, Textarea};
+use gpui_kit::component::select::Select;
 use gpui_kit::component::slider::Slider;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::tooltip::Tooltip;
@@ -15,15 +16,6 @@ use super::ScreenshotsView;
 use super::view::{RIGHT_PANEL, color, layer_icon};
 use crate::ui::controls::{self, Segmented, group, heading, row, separator, stacked};
 
-/// Background presets: name, gradient from/to, and the text colour that reads on it.
-const PRESETS: &[(&str, &str, &str, &str)] = &[
-    ("Indigo", "#4f46e5", "#9333ea", "#ffffff"),
-    ("Sunset", "#f97316", "#db2777", "#ffffff"),
-    ("Ocean", "#06b6d4", "#2563eb", "#ffffff"),
-    ("Mint", "#34d399", "#059669", "#ffffff"),
-    ("Midnight", "#0f172a", "#334155", "#ffffff"),
-    ("Paper", "#f8fafc", "#e2e8f0", "#0f172a"),
-];
 const SWATCHES: &[&str] = &[
     "#ffffff", "#0f172a", "#4f46e5", "#f97316", "#10b981", "#f43f5e", "#facc15",
 ];
@@ -38,11 +30,6 @@ const ALIGNS: &[(&str, Align)] = &[
     ("Left", Align::Left),
     ("Centre", Align::Center),
     ("Right", Align::Right),
-];
-const FRAMES: &[(&str, Frame)] = &[
-    ("Black", Frame::Black),
-    ("Silver", Frame::Silver),
-    ("None", Frame::None),
 ];
 const ANGLES: &[(&str, &str, i32)] = &[
     ("↓", "Top to bottom", 180),
@@ -59,7 +46,7 @@ const ROW_CONTROL: f32 = 150.;
 fn kind_name(layer: &Layer) -> &'static str {
     match layer.kind {
         LayerKind::Text { .. } => "Text",
-        LayerKind::Device { .. } => "iPhone",
+        LayerKind::Device { model, .. } => model.label(),
         LayerKind::Image { .. } => "Image",
         LayerKind::Shape { .. } => "Shape",
     }
@@ -240,8 +227,10 @@ impl ScreenshotsView {
                 weight,
                 align,
                 color: current,
+                italic,
                 ..
             } => {
+                let italic = *italic;
                 let weight_ix = WEIGHTS.iter().position(|(_, w)| w == weight).unwrap_or(3);
                 let align_ix = ALIGNS.iter().position(|(_, a)| a == align).unwrap_or(1);
                 let weights = WEIGHTS
@@ -271,6 +260,24 @@ impl ScreenshotsView {
                                     .child(Textarea::new(&self.inputs.text).appearance(false)),
                             )
                             .child(separator(cx))
+                            .child(row(
+                                "Font",
+                                div()
+                                    .w(px(ROW_CONTROL + 14.))
+                                    .h(px(28.))
+                                    .rounded(px(7.))
+                                    .bg(theme.foreground.opacity(0.06))
+                                    .child(
+                                        Select::new(&self.fonts)
+                                            .appearance(false)
+                                            .small()
+                                            .menu_width(px(250.))
+                                            .search_placeholder("Search fonts")
+                                            .placeholder("Helvetica Neue"),
+                                    ),
+                                cx,
+                            ))
+                            .child(separator(cx))
                             .child(stacked(
                                 "Size",
                                 Some(format!("{size:.0} pt")),
@@ -289,6 +296,18 @@ impl ScreenshotsView {
                             ))
                             .child(separator(cx))
                             .child(row(
+                                "Italic",
+                                Switch::new("text-italic").checked(italic).on_click(cx.listener(
+                                    move |this, checked: &bool, window, cx| {
+                                        if *checked != italic {
+                                            this.toggle_italic(window, cx);
+                                        }
+                                    },
+                                )),
+                                cx,
+                            ))
+                            .child(separator(cx))
+                            .child(row(
                                 "Alignment",
                                 aligns
                                     .selected(align_ix)
@@ -303,18 +322,40 @@ impl ScreenshotsView {
                     .into_any_element()
             }
             LayerKind::Device {
+                model,
                 frame,
                 shadow,
                 screenshot,
             } => {
-                let frame_ix = FRAMES.iter().position(|(_, f)| f == frame).unwrap_or(0);
-                let frames = FRAMES
+                let model = *model;
+                let models: Vec<DeviceModel> = DeviceModel::models_for(model.target()).collect();
+                let model_ix = models.iter().position(|m| *m == model).unwrap_or(0);
+                let model_control = models
                     .iter()
-                    .fold(Segmented::new("frame", ROW_CONTROL), |control, (name, _)| {
-                        control.label(*name)
-                    });
+                    .fold(Segmented::new("device-model", ROW_CONTROL + 18.), |control, m| {
+                        control.item(div().child(m.short_label()), m.label())
+                    })
+                    .selected(model_ix)
+                    .on_select(cx.listener(move |this, ix: &usize, window, cx| {
+                        if let Some(model) = DeviceModel::models_for(model.target()).nth(*ix) {
+                            this.set_model(model, window, cx)
+                        }
+                    }));
+                let framed = *frame != Frame::None;
+                let finishes = h_flex().gap(px(5.)).children(
+                    Frame::ALL
+                        .into_iter()
+                        .filter(|f| *f != Frame::None)
+                        .enumerate()
+                        .map(|(ix, finish)| {
+                            let edge = finish.edge_color().unwrap_or("#000000");
+                            controls::swatch(("finish", ix), color(edge), finish == *frame, cx)
+                                .tooltip(move |window, cx| Tooltip::new(finish.label()).build(window, cx))
+                                .on_click(cx.listener(move |this, _, window, cx| this.set_frame(finish, window, cx)))
+                        }),
+                );
                 v_flex()
-                    .child(heading("iPhone", cx))
+                    .child(heading(model.target().label(), cx))
                     .child(
                         group(cx)
                             .child(row(
@@ -331,15 +372,27 @@ impl ScreenshotsView {
                                 cx,
                             ))
                             .child(separator(cx))
+                            .child(row("Model", model_control, cx))
+                            .child(separator(cx))
                             .child(row(
                                 "Frame",
-                                frames
-                                    .selected(frame_ix)
-                                    .on_select(cx.listener(|this, ix: &usize, window, cx| {
-                                        this.set_frame(FRAMES[*ix].1, window, cx)
-                                    })),
+                                Switch::new("device-frame").checked(framed).on_click(cx.listener(
+                                    move |this, checked: &bool, window, cx| {
+                                        if *checked != framed {
+                                            this.set_frame(if *checked { Frame::Black } else { Frame::None }, window, cx)
+                                        }
+                                    },
+                                )),
                                 cx,
                             ))
+                            .when(framed, |this| {
+                                this.child(separator(cx)).child(stacked(
+                                    "Finish",
+                                    Some(frame.label().to_owned()),
+                                    finishes,
+                                    cx,
+                                ))
+                            })
                             .child(separator(cx))
                             .child(row("Shadow", shadow_switch(*shadow, cx), cx)),
                     )
@@ -429,7 +482,7 @@ impl ScreenshotsView {
 
         // Three across; a pixel spare for the panel's border.
         let tile_w = ((CONTENT - 18.) / 3.).floor();
-        let presets = PRESETS.iter().enumerate().map(|(ix, (name, p_from, p_to, text))| {
+        let presets = BACKGROUND_PRESETS.iter().enumerate().map(|(ix, (name, p_from, p_to, text))| {
             let chosen = gradient && from.eq_ignore_ascii_case(p_from) && to.eq_ignore_ascii_case(p_to);
             v_flex()
                 .id(("preset", ix))
@@ -547,7 +600,8 @@ impl ScreenshotsView {
             .text_size(px(12.))
             .text_color(theme.muted_foreground)
             .child("Click a layer to edit it. Drag to move it (hold ⌥ to skip snapping), drag a corner to resize it, and use the arrow keys to nudge.")
-            .child("Drag a phone past the edge to carry it onto the next screenshot.");
+            .child("Drag a device past the edge to carry it onto the next screenshot.")
+            .child("Ask your AI agent to design them too: AI agent, top right.");
 
         v_flex()
             .gap(px(18.))
@@ -563,12 +617,15 @@ impl ScreenshotsView {
                         div()
                             .text_size(px(11.))
                             .text_color(theme.muted_foreground)
-                            .child(format!(
-                                "{} · {} × {}, also exports 6.5″",
-                                CanvasSize::Iphone69.label(),
-                                BASE_WIDTH,
-                                BASE_HEIGHT,
-                            )),
+                            .child({
+                                let sizes = self.target.sizes();
+                                let (w, h) = sizes[0].pixels();
+                                format!(
+                                    "{} · {w} × {h}, also exports {}",
+                                    sizes[0].label(),
+                                    sizes.get(1).map_or("", |size| size.label())
+                                )
+                            }),
                     ),
             )
             .child(

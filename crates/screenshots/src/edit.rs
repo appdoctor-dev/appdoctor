@@ -2,7 +2,7 @@
 //! boxes that grow with their lines. Plain functions, so the editor's view
 //! only routes input and draws.
 
-use crate::{BASE_HEIGHT, BASE_WIDTH, LINE_HEIGHT, Layer, LayerKind, Rect, wrap};
+use crate::{LINE_HEIGHT, Layer, LayerKind, Rect};
 
 /// Where a snap line is drawn while dragging.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -43,16 +43,24 @@ impl Layer {
 
     /// Text boxes are as tall as their wrapped lines.
     pub fn fit_text(&mut self) {
-        if let LayerKind::Text { text, size, .. } = &self.kind {
-            let lines = wrap(text, *size, self.width).len().max(1) as f32;
+        if let LayerKind::Text { size, .. } = &self.kind {
+            let lines = self.lines().len().max(1) as f32;
             self.height = (lines * size * LINE_HEIGHT).ceil();
         }
     }
 }
 
-/// Moves `rect` by (dx, dy), snapping its edges and centre to the canvas
-/// edges and centre and to `others`' edges and centres within `threshold`.
-pub fn snap_move(rect: Rect, dx: f32, dy: f32, others: &[Rect], threshold: f32) -> (Rect, Vec<Guide>) {
+/// Moves `rect` by (dx, dy), snapping its edges and centre to the edges and
+/// centre of the `canvas` (width, height) and to `others`' edges and
+/// centres within `threshold`.
+pub fn snap_move(
+    rect: Rect,
+    dx: f32,
+    dy: f32,
+    canvas: (f32, f32),
+    others: &[Rect],
+    threshold: f32,
+) -> (Rect, Vec<Guide>) {
     let mut moved = Rect {
         x: rect.x + dx,
         y: rect.y + dy,
@@ -60,8 +68,9 @@ pub fn snap_move(rect: Rect, dx: f32, dy: f32, others: &[Rect], threshold: f32) 
     };
     let mut guides = Vec::new();
 
-    let mut xs = vec![0., BASE_WIDTH / 2., BASE_WIDTH];
-    let mut ys = vec![0., BASE_HEIGHT / 2., BASE_HEIGHT];
+    let (width, height) = canvas;
+    let mut xs = vec![0., width / 2., width];
+    let mut ys = vec![0., height / 2., height];
     for other in others {
         xs.extend([other.x, other.x + other.width / 2., other.x + other.width]);
         ys.extend([other.y, other.y + other.height / 2., other.y + other.height]);
@@ -116,6 +125,9 @@ pub fn resize(start: Rect, corner: Corner, dx: f32, dy: f32, keep_aspect: bool) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Target;
+
+    const CANVAS: (f32, f32) = (1320., 2868.);
 
     fn rect(x: f32, y: f32, width: f32, height: f32) -> Rect {
         Rect { x, y, width, height }
@@ -124,11 +136,11 @@ mod tests {
     #[test]
     fn snaps_to_canvas_centre_within_threshold() {
         // A 200-wide box whose centre lands at 655: within 8px of 660.
-        let (moved, guides) = snap_move(rect(0., 300., 200., 100.), 555., 0., &[], 8.);
+        let (moved, guides) = snap_move(rect(0., 300., 200., 100.), 555., 0., CANVAS, &[], 8.);
         assert_eq!(moved.x, 560.);
         assert_eq!(guides, vec![Guide::Vertical(660.)]);
         // Too far: no snap.
-        let (moved, guides) = snap_move(rect(0., 300., 200., 100.), 540., 0., &[], 8.);
+        let (moved, guides) = snap_move(rect(0., 300., 200., 100.), 540., 0., CANVAS, &[], 8.);
         assert_eq!(moved.x, 540.);
         assert!(guides.is_empty());
     }
@@ -136,7 +148,7 @@ mod tests {
     #[test]
     fn snaps_edges_to_other_layers() {
         let other = rect(100., 1000., 300., 300.);
-        let (moved, guides) = snap_move(rect(500., 500., 100., 100.), 0., 497., &[other], 6.);
+        let (moved, guides) = snap_move(rect(500., 500., 100., 100.), 0., 497., CANVAS, &[other], 6.);
         assert_eq!(moved.y, 1000.);
         assert!(guides.contains(&Guide::Horizontal(1000.)));
     }
@@ -163,7 +175,7 @@ mod tests {
 
     #[test]
     fn text_boxes_grow_with_their_lines() {
-        let mut layer = Layer::text(1, "Plan your whole day in seconds", 0., 100., 700, "#fff");
+        let mut layer = Layer::text(Target::Iphone, 1, "Plan your whole day in seconds", 0., 100., 700, "#fff");
         layer.set_rect(rect(0., 0., 2000., 10.));
         assert_eq!(layer.height, (100. * LINE_HEIGHT).ceil());
         layer.set_rect(rect(0., 0., 1000., 10.));

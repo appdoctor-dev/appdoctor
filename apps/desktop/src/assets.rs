@@ -23,6 +23,7 @@ static EXTRA: &[(&str, &[u8])] = extra_icons![
     "smartphone",
     "sparkles",
     "stethoscope",
+    "tablet",
     "text-align-center",
     "text-align-end",
     "text-align-start",
