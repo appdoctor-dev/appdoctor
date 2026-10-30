@@ -38,7 +38,7 @@ export function createAuth(env: Bindings, db: Db, stripeClient: Stripe = createS
     appName: "AppDoctor",
     baseURL: env.API_URL,
     secret: env.BETTER_AUTH_SECRET,
-    trustedOrigins: [env.WEB_URL],
+    trustedOrigins: [env.WEB_URL, ...(env.APP_URL ? [env.APP_URL] : [])],
     database: drizzleAdapter(db, { provider: "sqlite", schema }),
     advanced: env.COOKIE_DOMAIN
       ? { crossSubDomainCookies: { enabled: true, domain: env.COOKIE_DOMAIN } }
@@ -61,7 +61,7 @@ export function createAuth(env: Bindings, db: Db, stripeClient: Stripe = createS
       // Lets the desktop app call the API with the token from the device flow.
       bearer(),
       deviceAuthorization({
-        verificationUri: `${env.WEB_URL}/device`,
+        verificationUri: `${env.APP_URL ?? env.WEB_URL}/device`,
         validateClient: (clientId) => clientId === DESKTOP_CLIENT_ID,
       }),
       stripe({

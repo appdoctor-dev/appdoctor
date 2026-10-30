@@ -36,7 +36,7 @@ const app = new Hono<AppEnv>();
 app.use(
   "*",
   cors({
-    origin: (origin, c) => (origin === c.env.WEB_URL ? origin : null),
+    origin: (origin, c) => (origin === c.env.WEB_URL || origin === c.env.APP_URL ? origin : null),
     credentials: true,
     allowHeaders: ["Content-Type", "Authorization"],
     allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],

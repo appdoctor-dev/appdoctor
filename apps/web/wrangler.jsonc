@@ -1,12 +1,16 @@
 {
 	"$schema": "../../node_modules/wrangler/config-schema.json",
 	"name": "appdoctor-web",
+	// The account that owns the appdoctor.so zone.
+	"account_id": "626a497091279ca6bff81c9a37baf100",
 	"main": "./src/server.ts",
 	"compatibility_date": "2026-10-23",
 	"compatibility_flags": ["nodejs_compat"],
 	"observability": { "enabled": true },
 	"vars": {
 		"SITE_URL": "http://localhost:3000",
+		// Sign-in and account; the same host locally.
+		"APP_URL": "http://localhost:3000",
 		"API_URL": "http://localhost:8787",
 		// Public by design: IndexNow checks /{key}.txt on the site to accept pings.
 		"INDEXNOW_KEY": "8bef909a8fe2f7cfe1922e0d13a69266"
@@ -15,12 +19,19 @@
 		"production": {
 			"vars": {
 				"SITE_URL": "https://appdoctor.so",
+				"APP_URL": "https://app.appdoctor.so",
 				"API_URL": "https://api.appdoctor.so",
 				"INDEXNOW_KEY": "8bef909a8fe2f7cfe1922e0d13a69266"
 			},
 			// Server-side reads (pricing, downloads) go straight to the API worker.
 			"services": [{ "binding": "API", "service": "appdoctor-api-production" }],
-			"routes": [{ "pattern": "appdoctor.so", "custom_domain": true }]
+			// www redirects to the apex, and app. serves sign-in and the
+			// account, in src/server.ts.
+			"routes": [
+				{ "pattern": "appdoctor.so", "custom_domain": true },
+				{ "pattern": "www.appdoctor.so", "custom_domain": true },
+				{ "pattern": "app.appdoctor.so", "custom_domain": true }
+			]
 		}
 	}
 }

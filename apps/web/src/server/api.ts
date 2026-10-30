@@ -15,6 +15,7 @@ export type PublicPlan = {
 export type LatestBuild = { platform: "macos" | "windows"; arch: "arm64" | "x64"; version: string; size: number; notes: string }
 
 export const siteUrl = () => env.SITE_URL
+export const appUrl = () => (env as { APP_URL?: string }).APP_URL
 export const apiUrl = () => env.API_URL
 
 /** Server-side reads from the API: a service binding in production, plain fetch locally. */

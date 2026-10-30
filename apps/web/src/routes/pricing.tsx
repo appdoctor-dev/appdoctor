@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
-import { PageIntro, buttonClass } from "#/components/chrome"
+import { APP_URL, PageIntro, buttonClass } from "#/components/chrome"
 import { SITE } from "#/content/site"
 import { authClient } from "#/lib/auth"
 import { getPlans } from "#/lib/data.functions"
@@ -87,7 +87,9 @@ function PlanCard({
 
   async function subscribe() {
     if (!session) {
-      navigate({ to: "/login", search: { redirect: `/pricing?plan=${plan.id}${annual ? "&annual=true" : ""}` } })
+      const back = `/pricing?plan=${plan.id}${annual ? "&annual=true" : ""}`
+      if (APP_URL) window.location.assign(`${APP_URL}/login?redirect=${encodeURIComponent(back)}`)
+      else navigate({ to: "/login", search: { redirect: back } })
       return
     }
     setBusy(true)

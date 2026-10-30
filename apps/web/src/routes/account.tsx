@@ -129,7 +129,7 @@ function Account() {
         </section>
       )}
 
-      <button type="button" onClick={() => authClient.signOut().then(() => (window.location.href = "/"))} className="mt-10 text-sm text-ink-soft underline underline-offset-4">
+      <button type="button" onClick={() => authClient.signOut().then(() => (window.location.href = "/login"))} className="mt-10 text-sm text-ink-soft underline underline-offset-4">
         Sign out of this website
       </button>
     </div>

@@ -11,6 +11,8 @@ export type Bindings = {
 
   API_URL: string;
   WEB_URL: string;
+  /** Where people sign in and manage their account (app.appdoctor.so); the website when unset. */
+  APP_URL?: string;
   /** e.g. ".appdoctor.so" so the website and the API share one session in production. */
   COOKIE_DOMAIN?: string;
   EMAIL_FROM: string;

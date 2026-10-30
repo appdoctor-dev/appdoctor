@@ -1,6 +1,8 @@
 {
 	"$schema": "../../node_modules/wrangler/config-schema.json",
 	"name": "appdoctor-api",
+	// The account that owns the appdoctor.so zone.
+	"account_id": "626a497091279ca6bff81c9a37baf100",
 	"main": "src/index.ts",
 	"compatibility_date": "2026-10-23",
 	"compatibility_flags": ["nodejs_compat"],
@@ -9,6 +11,7 @@
 	"vars": {
 		"API_URL": "http://localhost:8787",
 		"WEB_URL": "http://localhost:3000",
+		"APP_URL": "http://localhost:3000",
 		"EMAIL_FROM": "AppDoctor <hello@appdoctor.so>",
 		"STRIPE_AUTOMATIC_TAX": "false",
 		"LICENSE_GRACE_DAYS": "7"
@@ -23,12 +26,13 @@
 	],
 	"r2_buckets": [{ "binding": "RELEASES", "bucket_name": "appdoctor-releases" }],
 	"env": {
-		// `npm run deploy -w @repo/api` deploys this. Replace the domain and the
-		// D1 database_id (`wrangler d1 create appdoctor`) before the first deploy.
+		// `npm run deploy -w @repo/api` deploys this to api.appdoctor.so.
 		"production": {
 			"vars": {
 				"API_URL": "https://api.appdoctor.so",
 				"WEB_URL": "https://appdoctor.so",
+				// Sign-in, account and the desktop app's device sign-in.
+				"APP_URL": "https://app.appdoctor.so",
 				"COOKIE_DOMAIN": ".appdoctor.so",
 				"EMAIL_FROM": "AppDoctor <hello@appdoctor.so>",
 				"STRIPE_AUTOMATIC_TAX": "false",
@@ -38,7 +42,7 @@
 				{
 					"binding": "DB",
 					"database_name": "appdoctor",
-					"database_id": "00000000-0000-0000-0000-000000000000",
+					"database_id": "ca1dbe5c-286d-43c5-983c-557800e183f7",
 					"migrations_dir": "../../packages/db/migrations"
 				}
 			],

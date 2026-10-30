@@ -2,6 +2,9 @@ import { Link } from "@tanstack/react-router"
 import { NAV, SITE } from "#/content/site"
 import { authClient } from "#/lib/auth"
 
+/** Where sign-in and the account live (app.appdoctor.so); this site when unset, as locally. */
+export const APP_URL = import.meta.env.VITE_APP_URL ?? ""
+
 export function SiteHeader() {
   const { data: session } = authClient.useSession()
 
@@ -21,13 +24,13 @@ export function SiteHeader() {
         </nav>
         <div className="ml-auto flex items-center gap-4 text-[13px]">
           {session ? (
-            <Link to="/account" className="text-ink/80 hover:text-ink">
+            <a href={`${APP_URL}/account`} className="text-ink/80 hover:text-ink">
               Account
-            </Link>
+            </a>
           ) : (
-            <Link to="/login" className="text-ink/80 hover:text-ink">
+            <a href={`${APP_URL}/login`} className="text-ink/80 hover:text-ink">
               Sign in
-            </Link>
+            </a>
           )}
           <Link to="/download" className={buttonClass("primary", "sm")}>
             Download

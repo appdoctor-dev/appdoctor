@@ -1,6 +1,8 @@
 {
 	"$schema": "../../node_modules/wrangler/config-schema.json",
 	"name": "appdoctor-admin",
+	// The account that owns the appdoctor.so zone.
+	"account_id": "626a497091279ca6bff81c9a37baf100",
 	"main": "@tanstack/react-start/server-entry",
 	"compatibility_date": "2026-10-23",
 	"compatibility_flags": ["nodejs_compat"],
