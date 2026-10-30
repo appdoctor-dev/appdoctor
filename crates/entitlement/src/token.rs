@@ -174,7 +174,8 @@ mod tests {
         for text in [b64url.as_str(), &STANDARD.encode(raw), &hex, &pem] {
             assert_eq!(parse_public_key(text).unwrap(), public, "{text}");
         }
-        assert_eq!(parse_public_key(crate::PUBLIC_KEY), Err(TokenError::NoPublicKey));
+        // The compiled-in production key is a valid one.
+        assert!(parse_public_key(crate::PUBLIC_KEY).is_ok());
         assert_eq!(parse_public_key("abc"), Err(TokenError::NoPublicKey));
     }
 }

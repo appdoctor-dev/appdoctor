@@ -25,13 +25,12 @@ pub use token::{Claims, TokenError, parse_public_key, verify};
 /// The Ed25519 public key entitlement tokens are verified against:
 /// base64url of the raw 32 bytes, as `npm run keys:generate` in `apps/api`
 /// prints it.
-// TODO(release): replace with the production key before shipping signed
-// builds. Until then no token verifies, so builds without
-// `no-license-check` show "Not activated".
-pub const PUBLIC_KEY: &str = "REPLACE_WITH_PUBLIC_KEY_FROM_keys:generate";
+// The production key (api.appdoctor.so holds the private half); debug
+// builds can use another with `APPDOCTOR_ENTITLEMENT_PUBLIC_KEY`.
+pub const PUBLIC_KEY: &str = "UuFXxcemnAL5Z83ShhYUx5ywncBCe3AXFYKnPaTHKko";
 
 /// Default AppDoctor API, overridable in Settings for self-hosting and dev.
-pub const DEFAULT_API_BASE: &str = "http://localhost:8787";
+pub const DEFAULT_API_BASE: &str = "https://api.appdoctor.so";
 
 /// The OAuth client ID Better Auth knows the desktop app by.
 pub const CLIENT_ID: &str = "appdoctor-desktop";
