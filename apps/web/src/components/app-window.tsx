@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import {
   DEMO_APP,
   DEMO_AUDIT,
@@ -27,24 +27,37 @@ export const VIEW_LABELS: Record<View, string> = {
 
 const FLAGS: Record<Country, string> = { us: "🇺🇸", gb: "🇬🇧" }
 
-export function AppWindow({ view, onView }: { view: View; onView: (view: View) => void }) {
-  const [aiOpen, setAiOpen] = useState(false)
+/**
+ * The window, starting on `start` (and with the AI panel open, given `ai`).
+ * Each copy keeps its own state, so every section of a page can show a
+ * different screen that still works.
+ */
+export function AppWindow({ start = "keywords", ai = false, height = 600, label }: { start?: View; ai?: boolean; height?: number; label?: string }) {
+  const [view, onView] = useState<View>(start)
+  const [aiOpen, setAiOpen] = useState(ai)
+  // A chat open from the start is shown whole (and server-rendered); one
+  // the reader opens plays out.
+  const opened = useRef(false)
+  const toggleAi = (open?: boolean) => {
+    opened.current = true
+    setAiOpen((o) => open ?? !o)
+  }
   return (
     <figure
-      className="font-system overflow-hidden rounded-[14px] bg-app-window text-[13px] text-app-text shadow-[0_0_0_1px_rgb(0_0_0/0.35),0_40px_80px_-30px_rgb(15_27_45/0.55)]"
-      aria-label="AppDoctor, with example data"
+      className="font-system overflow-hidden rounded-[14px] bg-app-window text-left text-[13px] text-app-text shadow-[0_0_0_0.5px_rgb(0_0_0/0.4),0_30px_70px_-20px_rgb(0_0_0/0.35)]"
+      aria-label={label ?? "AppDoctor, with example data"}
     >
       <TitleBar />
-      <div className="flex flex-col md:h-[600px] md:flex-row">
+      <div className="flex flex-col md:h-[var(--app-height)] md:flex-row" style={{ "--app-height": `${height}px` } as React.CSSProperties}>
         <Sidebar view={view} onView={onView} />
         <div className="flex min-h-[520px] min-w-0 flex-1 flex-col md:min-h-0">
-          {view === "keywords" && <KeywordsView aiOpen={aiOpen} onAi={() => setAiOpen((o) => !o)} />}
+          {view === "keywords" && <KeywordsView aiOpen={aiOpen} onAi={() => toggleAi()} />}
           {view === "rankings" && <RankingsView />}
-          {view === "audit" && <AuditView onAi={() => setAiOpen(true)} />}
-          {view === "localization" && <LocalizationView aiOpen={aiOpen} onAi={() => setAiOpen((o) => !o)} />}
+          {view === "audit" && <AuditView onAi={() => toggleAi(true)} />}
+          {view === "localization" && <LocalizationView aiOpen={aiOpen} onAi={() => toggleAi()} />}
           {view === "screenshots" && <ScreenshotsView />}
         </div>
-        {aiOpen && <AiPanel onClose={() => setAiOpen(false)} />}
+        {aiOpen && <AiPanel play={opened.current} onClose={() => setAiOpen(false)} />}
       </div>
     </figure>
   )
@@ -696,17 +709,18 @@ function ScreenshotsView() {
 /* AI panel                                                                  */
 /* ------------------------------------------------------------------------ */
 
-function AiPanel({ onClose }: { onClose: () => void }) {
-  // The conversation plays out once when the panel opens.
-  const [shown, setShown] = useState(0)
+function AiPanel({ play, onClose }: { play: boolean; onClose: () => void }) {
+  // The conversation plays out once when the reader opens the panel.
+  const [shown, setShown] = useState(play ? 0 : DEMO_CHAT.steps.length + 1)
   useEffect(() => {
+    if (!play) return
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       setShown(DEMO_CHAT.steps.length + 1)
       return
     }
     const timers = Array.from({ length: DEMO_CHAT.steps.length + 1 }, (_, i) => setTimeout(() => setShown(i + 1), 450 * (i + 1)))
     return () => timers.forEach(clearTimeout)
-  }, [])
+  }, [play])
   return (
     <aside aria-label="Make with AI" className="flex w-full shrink-0 flex-col border-t border-app-line bg-app-side md:w-[290px] md:border-t-0 md:border-l">
       <div className="flex items-center justify-between border-b border-app-line px-4 py-3">

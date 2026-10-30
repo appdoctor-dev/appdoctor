@@ -1,37 +1,58 @@
 import { Link, createFileRoute } from "@tanstack/react-router"
-import { PageIntro } from "#/components/chrome"
+import { DocsLayout } from "#/components/docs"
+import { DOC_GROUPS } from "#/content/collections"
 import { SITE } from "#/content/site"
-import { getDocs } from "#/lib/data.functions"
+import { getDocs, getDocsSearch } from "#/lib/data.functions"
 
 export const Route = createFileRoute("/docs/")({
-  loader: () => getDocs(),
+  loader: async () => {
+    const [docs, search] = await Promise.all([getDocs(), getDocsSearch()])
+    return { docs, search }
+  },
   head: () => ({
     meta: [
-      { title: `Docs: ${SITE.name}` },
-      { name: "description", content: `How to set up and use ${SITE.name}, the ASO tool for keyword research and rank tracking.` },
+      { title: `Docs: ${SITE.name}, the ASO keyword research tool` },
+      { name: "description", content: `How to set up and use ${SITE.name}: connect App Store Connect and Apple Ads, research keywords, track ranks, audit your listing, design screenshots and work with your own AI.` },
     ],
   }),
   component: DocsIndex,
 })
 
 function DocsIndex() {
-  const docs = Route.useLoaderData()
+  const { docs, search } = Route.useLoaderData()
   return (
-    <>
-      <PageIntro title="Docs">
-        Setting up {SITE.name}, connecting Apple accounts, and what the numbers mean. Every page is also available as
-        Markdown for AI agents: add <code>.md</code> to its address.
-      </PageIntro>
-      <ol className="mx-auto grid max-w-6xl gap-4 px-4 pb-20 sm:px-6 md:grid-cols-2">
-        {docs.map((doc) => (
-          <li key={doc.slug}>
-            <Link to="/docs/$slug" params={{ slug: doc.slug }} className="block h-full rounded-2xl border border-line bg-surface p-6 hover:border-ink/30">
-              <h2 className="text-lg font-semibold">{doc.title}</h2>
-              <p className="mt-1 text-ink-soft">{doc.description}</p>
-            </Link>
-          </li>
-        ))}
-      </ol>
-    </>
+    <DocsLayout docs={docs} search={search} current={null}>
+      <div className="max-w-[820px]">
+        <h1 className="text-[2.6rem] leading-[1.08] font-semibold tracking-[-0.03em]">{SITE.name} docs</h1>
+        <p className="mt-4 max-w-[56ch] text-[19px] leading-relaxed text-ink-soft">
+          Setting up {SITE.name}, connecting your Apple accounts, what the numbers mean, and working with your own AI. Every
+          page is also plain Markdown for AI tools: add <code className="rounded bg-surface px-1">.md</code> to its address,
+          or use Copy page.
+        </p>
+        <div className="mt-12 grid gap-10">
+          {DOC_GROUPS.map((group) => {
+            const pages = docs.filter((d) => d.group === group)
+            if (!pages.length) return null
+            return (
+              <section key={group} aria-labelledby={`group-${group}`}>
+                <h2 id={`group-${group}`} className="text-[13px] font-semibold text-ink-soft">
+                  {group}
+                </h2>
+                <ul className="mt-3 grid gap-3 sm:grid-cols-2">
+                  {pages.map((doc) => (
+                    <li key={doc.slug}>
+                      <Link to="/docs/$slug" params={{ slug: doc.slug }} className="block h-full rounded-2xl bg-surface p-5 transition-colors hover:bg-[#ececf0]">
+                        <span className="block text-[17px] font-semibold">{doc.title}</span>
+                        <span className="mt-1 block text-[14px] leading-relaxed text-ink-soft">{doc.description}</span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )
+          })}
+        </div>
+      </div>
+    </DocsLayout>
   )
 }

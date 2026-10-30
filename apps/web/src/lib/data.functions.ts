@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start"
-import { DOCS, POSTS, renderMarkdown } from "#/content/collections"
+import { DOCS, POSTS, headingsOf, renderMarkdown } from "#/content/collections"
 import { fetchLatestBuilds, fetchPlans } from "#/server/api"
 
 export const getPlans = createServerFn({ method: "GET" }).handler(() => fetchPlans())
@@ -20,6 +20,21 @@ export const getPost = createServerFn({ method: "GET" })
 export const getDoc = createServerFn({ method: "GET" })
   .validator((slug: string) => slug)
   .handler(({ data: slug }) => {
-    const doc = DOCS.find((d) => d.slug === slug)
-    return doc ? { ...meta(doc), html: renderMarkdown(doc.markdown) } : null
+    const index = DOCS.findIndex((d) => d.slug === slug)
+    const doc = DOCS[index]
+    if (!doc) return null
+    const link = (d: (typeof DOCS)[number] | undefined) => (d ? { slug: d.slug, title: d.title } : null)
+    return {
+      ...meta(doc),
+      html: renderMarkdown(doc.markdown),
+      markdown: doc.markdown,
+      headings: headingsOf(doc.markdown),
+      previous: link(DOCS[index - 1]),
+      next: link(DOCS[index + 1]),
+    }
   })
+
+/** Everything docs search looks through: titles, descriptions and headings. */
+export const getDocsSearch = createServerFn({ method: "GET" }).handler(() =>
+  DOCS.map((d) => ({ slug: d.slug, title: d.title, description: d.description, group: d.group, headings: headingsOf(d.markdown) })),
+)

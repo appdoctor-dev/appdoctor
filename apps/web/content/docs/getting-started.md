@@ -2,6 +2,7 @@
 title: Getting started
 description: Install AppDoctor, sign in, add your app and check your first keyword rankings.
 order: 1
+group: Start
 ---
 
 AppDoctor is a desktop ASO tool for macOS and Windows. Everything it learns about your apps and keywords is stored on your computer.

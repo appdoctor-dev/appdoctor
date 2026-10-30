@@ -2,6 +2,7 @@
 title: Connect Apple Ads
 description: Connect your Apple Ads account to see Apple's 0–100 search popularity for any keyword.
 order: 3
+group: Connect your accounts
 ---
 
 Apple Ads publishes how often a search phrase is used, as a popularity score from 0 to 100. AppDoctor reads it through the Apple Ads Platform API with your own Apple Ads account, directly from your computer.

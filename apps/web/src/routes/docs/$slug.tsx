@@ -1,46 +1,57 @@
-import { Link, createFileRoute, notFound } from "@tanstack/react-router"
+import { createFileRoute, notFound } from "@tanstack/react-router"
+import { DocArticle, DocsLayout } from "#/components/docs"
 import { SITE } from "#/content/site"
-import { getDoc, getDocs } from "#/lib/data.functions"
+import { getDoc, getDocs, getDocsSearch } from "#/lib/data.functions"
+import { breadcrumbs } from "#/lib/jsonld"
 
 export const Route = createFileRoute("/docs/$slug")({
   loader: async ({ params }) => {
-    const [doc, docs] = await Promise.all([getDoc({ data: params.slug }), getDocs()])
+    const [doc, docs, search] = await Promise.all([getDoc({ data: params.slug }), getDocs(), getDocsSearch()])
     if (!doc) throw notFound()
-    return { doc, docs }
+    return { doc, docs, search }
   },
-  head: ({ loaderData }) => ({
-    meta: loaderData
-      ? [{ title: `${loaderData.doc.title}: ${SITE.name} docs` }, { name: "description", content: loaderData.doc.description }]
-      : [],
-  }),
+  head: ({ loaderData }) =>
+    loaderData
+      ? {
+          meta: [
+            { title: `${loaderData.doc.title}: ${SITE.name} docs` },
+            { name: "description", content: loaderData.doc.description },
+            { property: "og:title", content: loaderData.doc.title },
+            { property: "og:description", content: loaderData.doc.description },
+          ],
+          scripts: [
+            {
+              type: "application/ld+json",
+              children: JSON.stringify({
+                "@context": "https://schema.org",
+                "@graph": [
+                  {
+                    "@type": "TechArticle",
+                    headline: loaderData.doc.title,
+                    description: loaderData.doc.description,
+                    ...(loaderData.doc.updated ? { dateModified: loaderData.doc.updated } : {}),
+                    about: { "@id": `${SITE.url}/#software` },
+                    publisher: { "@id": `${SITE.url}/#organization` },
+                  },
+                  breadcrumbs([
+                    { name: SITE.name, path: "/" },
+                    { name: "Docs", path: "/docs" },
+                    { name: loaderData.doc.title, path: `/docs/${loaderData.doc.slug}` },
+                  ]),
+                ],
+              }),
+            },
+          ],
+        }
+      : {},
   component: DocPage,
 })
 
 function DocPage() {
-  const { doc, docs } = Route.useLoaderData()
+  const { doc, docs, search } = Route.useLoaderData()
   return (
-    <div className="mx-auto grid max-w-6xl gap-10 px-4 py-14 sm:px-6 lg:grid-cols-[220px_1fr]">
-      <nav aria-label="Docs" className="text-sm lg:sticky lg:top-6 lg:self-start">
-        <ul className="flex flex-col gap-1">
-          {docs.map((d) => (
-            <li key={d.slug}>
-              <Link
-                to="/docs/$slug"
-                params={{ slug: d.slug }}
-                className="block rounded-md px-2 py-1.5 text-ink-soft hover:text-ink"
-                activeProps={{ className: "bg-surface font-medium text-ink" }}
-              >
-                {d.title}
-              </Link>
-            </li>
-          ))}
-        </ul>
-      </nav>
-      <article className="max-w-[68ch]">
-        <h1 className="text-4xl font-bold tracking-tight">{doc.title}</h1>
-        <p className="mt-3 text-lg text-ink-soft">{doc.description}</p>
-        <div className="prose-doc mt-8" dangerouslySetInnerHTML={{ __html: doc.html }} />
-      </article>
-    </div>
+    <DocsLayout docs={docs} search={search} current={doc.slug} contents={doc.headings}>
+      <DocArticle page={doc} />
+    </DocsLayout>
   )
 }

@@ -6,129 +6,145 @@ export function SiteHeader() {
   const { data: session } = authClient.useSession()
 
   return (
-    <header className="border-b border-line bg-paper/90 backdrop-blur supports-[backdrop-filter]:bg-paper/70">
-      <div className="mx-auto flex h-16 max-w-6xl items-center gap-6 px-4 sm:px-6">
-        <Link to="/" className="flex items-center gap-2 text-[17px] font-bold tracking-tight">
-          <Mark />
+    <header className="sticky top-0 z-40 border-b border-black/[0.08] bg-white/80 backdrop-blur-xl supports-[backdrop-filter]:bg-white/70">
+      <div className="mx-auto flex h-[52px] max-w-[1080px] items-center gap-7 px-5">
+        <Link to="/" className="flex items-center gap-2 text-[15px] font-semibold tracking-[-0.01em]">
+          <Mark className="size-[26px]" />
           {SITE.name}
         </Link>
-        <nav className="hidden items-center gap-5 text-sm text-ink-soft md:flex">
+        <nav aria-label="Site" className="hidden items-center gap-6 text-[13px] text-ink/80 md:flex">
           {NAV.map((item) => (
             <Link key={item.to} to={item.to} className="hover:text-ink" activeProps={{ className: "text-ink" }}>
               {item.label}
             </Link>
           ))}
         </nav>
-        <div className="ml-auto flex items-center gap-3 text-sm">
+        <div className="ml-auto flex items-center gap-4 text-[13px]">
           {session ? (
-            <Link to="/account" className="font-medium hover:underline">
+            <Link to="/account" className="text-ink/80 hover:text-ink">
               Account
             </Link>
           ) : (
-            <Link to="/login" className="text-ink-soft hover:text-ink">
+            <Link to="/login" className="text-ink/80 hover:text-ink">
               Sign in
             </Link>
           )}
           <Link to="/download" className={buttonClass("primary", "sm")}>
             Download
           </Link>
+          <details className="group relative md:hidden">
+            <summary className="grid size-8 cursor-pointer list-none place-items-center rounded-full hover:bg-surface" aria-label="Menu">
+              <svg viewBox="0 0 16 16" className="size-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                <path d="M2.5 5h11M2.5 11h11" className="group-open:hidden" />
+                <path d="m4 4 8 8M12 4l-8 8" className="hidden group-open:block" />
+              </svg>
+            </summary>
+            <nav aria-label="Site" className="absolute top-10 right-0 w-56 rounded-2xl border border-line bg-white p-2 shadow-[0_20px_50px_-12px_rgb(0_0_0/0.25)]">
+              {NAV.map((item) => (
+                <Link key={item.to} to={item.to} className="block rounded-lg px-3 py-2.5 text-[15px] hover:bg-surface">
+                  {item.label}
+                </Link>
+              ))}
+            </nav>
+          </details>
         </div>
       </div>
     </header>
   )
 }
 
+const FOOTER = [
+  {
+    title: "AppDoctor",
+    links: [
+      { to: "/download", label: "Download" },
+      { to: "/pricing", label: "Pricing" },
+      { to: "/blog", label: "Blog" },
+    ],
+  },
+  {
+    title: "Learn",
+    links: [
+      { to: "/aso-keyword-research", label: "ASO keyword research" },
+      { to: "/aso-keyword-research-tools", label: "ASO keyword research tools" },
+      { to: "/docs", label: "Docs" },
+    ],
+  },
+  {
+    title: "About",
+    links: [
+      { to: "/privacy", label: "Privacy" },
+      { href: SITE.sourceUrl, label: "Source code" },
+      { href: "/llms.txt", label: "For AI agents" },
+    ],
+  },
+] as const
+
 export function SiteFooter() {
   return (
-    <footer className="border-t border-line">
-      <div className="mx-auto grid max-w-6xl gap-8 px-4 py-10 text-sm text-ink-soft sm:grid-cols-[2fr_1fr_1fr] sm:px-6">
-        <p className="max-w-sm">
-          {SITE.name} is an open-source ASO keyword research tool for Mac and Windows. Your keywords and rankings stay on
-          your computer.
+    <footer className="bg-surface text-[12px] text-ink-soft">
+      <div className="mx-auto max-w-[1080px] px-5 pt-8 pb-10">
+        <p className="max-w-xl border-b border-line pb-4">
+          {SITE.name} is an open-source ASO keyword research tool for Mac and Windows. Your keywords, rankings and keys
+          stay on your computer.
         </p>
-        <ul className="flex flex-col gap-2">
-          <li>
-            <Link to="/aso-keyword-research" className="hover:text-ink">
-              ASO keyword research
-            </Link>
-          </li>
-          <li>
-            <Link to="/aso-keyword-research-tools" className="hover:text-ink">
-              ASO keyword research tools
-            </Link>
-          </li>
-          <li>
-            <Link to="/pricing" className="hover:text-ink">
-              Pricing
-            </Link>
-          </li>
-          <li>
-            <Link to="/docs" className="hover:text-ink">
-              Docs
-            </Link>
-          </li>
-          <li>
-            <Link to="/blog" className="hover:text-ink">
-              Blog
-            </Link>
-          </li>
-        </ul>
-        <ul className="flex flex-col gap-2">
-          <li>
-            <Link to="/privacy" className="hover:text-ink">
-              Privacy
-            </Link>
-          </li>
-          <li>
-            <a href={SITE.sourceUrl} className="hover:text-ink">
-              Source code
-            </a>
-          </li>
-          <li>
-            <a href="/llms.txt" className="hover:text-ink">
-              For AI agents
-            </a>
-          </li>
-        </ul>
+        <div className="grid grid-cols-2 gap-8 py-6 sm:grid-cols-3">
+          {FOOTER.map((column) => (
+            <div key={column.title}>
+              <h2 className="mb-2.5 font-semibold text-ink">{column.title}</h2>
+              <ul className="flex flex-col gap-2">
+                {column.links.map((link) => (
+                  <li key={link.label}>
+                    {"to" in link ? (
+                      <Link to={link.to} className="hover:text-ink hover:underline">
+                        {link.label}
+                      </Link>
+                    ) : (
+                      <a href={link.href} className="hover:text-ink hover:underline">
+                        {link.label}
+                      </a>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+        <p className="border-t border-line pt-4">Not affiliated with Apple. App Store is a trademark of Apple Inc.</p>
       </div>
     </footer>
   )
 }
 
-/** A search field's magnifier with a pulse line through it: searching, checked. */
-export function Mark({ className = "size-6" }: { className?: string }) {
+/** The app's icon: a search magnifier with a pulse through it, on the app's indigo. */
+export function Mark({ className = "size-7" }: { className?: string }) {
   return (
-    <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
-      <circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" strokeWidth="2" />
-      <path d="M15.2 15.2 21 21" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
-      <path
-        d="M5 10.5h2.2l1.4-3 2 6 1.4-3H15"
-        fill="none"
-        stroke="var(--color-up)"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
+    <span className={`grid shrink-0 place-items-center rounded-[24%] bg-[linear-gradient(155deg,#6d6bf2,#4a49d4)] shadow-[inset_0_0_0_0.5px_rgb(0_0_0/0.2)] ${className}`} aria-hidden="true">
+      <svg viewBox="0 0 24 24" className="size-[62%]">
+        <circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="#fff" strokeWidth="2.2" />
+        <path d="M15.4 15.4 20 20" stroke="#fff" strokeWidth="2.6" strokeLinecap="round" />
+        <path d="M6.2 11h2l1.3-2.8 1.9 5.4 1.3-2.6h1.6" fill="none" stroke="#a7f3c8" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </span>
   )
 }
 
-export function buttonClass(variant: "primary" | "secondary" = "primary", size: "sm" | "md" = "md") {
-  const base =
-    "inline-flex items-center justify-center gap-2 rounded-lg font-semibold transition-colors disabled:opacity-50"
-  const sizes = { sm: "h-9 px-3.5 text-sm", md: "h-11 px-5 text-[15px]" }
+export function buttonClass(variant: "primary" | "secondary" | "plain" = "primary", size: "sm" | "md" | "lg" = "md") {
+  const base = "inline-flex items-center justify-center gap-2 rounded-full font-medium transition-colors disabled:opacity-50"
+  const sizes = { sm: "h-7 px-3 text-[12px]", md: "h-10 px-5 text-[15px]", lg: "h-12 px-7 text-[17px]" }
   const variants = {
-    primary: "bg-ink text-paper hover:bg-ink/85",
-    secondary: "border border-line bg-surface text-ink hover:border-ink/30",
+    primary: "bg-accent text-white hover:bg-accent-hover",
+    secondary: "border border-accent text-accent hover:bg-accent hover:text-white",
+    plain: "text-accent hover:underline",
   }
   return `${base} ${sizes[size]} ${variants[variant]}`
 }
 
 export function PageIntro({ title, children }: { title: string; children?: React.ReactNode }) {
   return (
-    <div className="mx-auto max-w-6xl px-4 pt-14 pb-8 sm:px-6">
-      <h1 className="max-w-3xl text-4xl font-bold tracking-tight text-balance sm:text-5xl">{title}</h1>
-      {children && <div className="mt-4 max-w-2xl text-lg text-ink-soft">{children}</div>}
+    <div className="mx-auto max-w-[1080px] px-5 pt-16 pb-10 text-center sm:pt-20">
+      <h1 className="mx-auto max-w-3xl text-[2.5rem] leading-[1.08] font-semibold tracking-[-0.025em] text-balance sm:text-[3.5rem]">{title}</h1>
+      {children && <div className="mx-auto mt-4 max-w-2xl text-[19px] leading-relaxed text-ink-soft">{children}</div>}
     </div>
   )
 }

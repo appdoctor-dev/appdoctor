@@ -1,9 +1,8 @@
 import { Link, createFileRoute } from "@tanstack/react-router"
-import { useState } from "react"
 import { AppWindow, type View } from "#/components/app-window"
-import { buttonClass } from "#/components/chrome"
-import { GUIDES } from "#/content/guides"
-import { FAQ, FEATURES, PRIVACY_POINTS, SITE } from "#/content/site"
+import { Mark, buttonClass } from "#/components/chrome"
+import { KEYWORD_RESEARCH } from "#/content/guides"
+import { FAQ, SITE } from "#/content/site"
 import { faqPage } from "#/lib/jsonld"
 
 export const Route = createFileRoute("/")({
@@ -17,222 +16,163 @@ export const Route = createFileRoute("/")({
   component: Home,
 })
 
-/** The research loop, each step shown in the app window above. */
-const STEPS: { title: string; body: string; view: View }[] = [
+/** One job per section, each shown on a working copy of that screen. */
+const SECTIONS: { id: string; title: string; body: string; more: { to: string; label: string }; start: View; ai?: boolean }[] = [
   {
-    title: "Find the searches",
-    body: "Add the words your app is for and AppDoctor checks each one: Apple's popularity score from your Apple Ads account, and how strong the apps in the top 10 are.",
-    view: "keywords",
+    id: "listing",
+    title: "Write the listing search can read.",
+    body: "Edit your name, subtitle and keyword field with live counts. AppDoctor shows which tracked keywords your listing can't match yet and which words you've spent twice, then saves to App Store Connect when you confirm.",
+    more: { to: "/aso-keyword-research", label: "Read the keyword research guide" },
+    start: "localization",
   },
   {
-    title: "Pick the ones you can win",
-    body: "Sort by popularity and difficulty, and compare countries. A keyword you can be third for brings more installs than one you'll never reach.",
-    view: "keywords",
+    id: "audit",
+    title: "A checkup for your whole product page.",
+    body: "One score out of 100 for your listing text, keywords, screenshots and video, ratings and updates, and countries and languages. Then the fixes, worst first.",
+    more: { to: "/docs/aso-audit", label: "How the audit works" },
+    start: "audit",
   },
   {
-    title: "Put them in your listing",
-    body: "Edit the name, subtitle and keyword field with live counts. AppDoctor shows which tracked keywords your listing can't match and which words you've wasted, then saves to App Store Connect.",
-    view: "localization",
+    id: "ai",
+    title: "Your own AI, already inside.",
+    body: "Claude Code, Codex, Gemini CLI or a model in Ollama, with the sign-in you already have. It reads your keywords, ranks and listing and suggests changes. Nothing reaches the App Store until you review it.",
+    more: { to: "/docs/ai-agents", label: "Using AppDoctor with AI" },
+    start: "keywords",
+    ai: true,
   },
   {
-    title: "See what changed",
-    body: "Ranks are checked in every country you track and kept as history, so a release that moved you from 22nd to 8th shows as a line, not a hunch.",
-    view: "rankings",
+    id: "countries",
+    title: "Every country, its own keywords.",
+    body: "Track the same app in the US, the UK or any storefront. See what climbed after a release, what fell, and which countries have no listing in their language yet.",
+    more: { to: "/docs/countries-and-languages", label: "Countries and languages" },
+    start: "rankings",
+  },
+  {
+    id: "screenshots",
+    title: "Screenshots and previews that sell.",
+    body: "Real frames for every iPhone and iPad, the new product page header and search art, and app preview videos exported at Apple's sizes.",
+    more: { to: "/docs/screenshots-and-videos", label: "Screenshots and videos" },
+    start: "screenshots",
   },
 ]
 
-function Home() {
-  const [view, setView] = useState<View>("keywords")
-  const show = (next: View) => {
-    setView(next)
-    document.getElementById("app")?.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "center" })
-  }
-  const rest = FEATURES.filter((f) => !["keywords", "ranks", "listing"].includes(f.id))
-
+function Downloads({ size = "lg" }: { size?: "md" | "lg" }) {
   return (
-    <>
-      <section className="overflow-hidden">
-        <div className="mx-auto max-w-6xl px-4 pt-16 sm:px-6 lg:pt-24">
-          <h1 className="max-w-[15ch] text-[2.7rem] leading-[1.02] font-bold tracking-[-0.025em] text-balance sm:text-[4.4rem]">
-            ASO keyword research with Apple's own numbers
-          </h1>
-          <div className="mt-7 grid gap-8 lg:grid-cols-[minmax(0,34rem)_1fr] lg:items-end">
-            <p className="text-lg leading-relaxed text-ink-soft">
-              {SITE.name} finds the App Store searches worth winning, tracks your rank in every country, audits your listing
-              and lets your own AI fix it. It's an app for Mac and Windows, and your keywords stay on your computer.
-            </p>
-            <div className="flex flex-wrap gap-3 lg:justify-end">
-              <Link to="/download" className={buttonClass("primary")}>
-                Download for Mac or Windows
-              </Link>
-              <Link to="/aso-keyword-research" className={buttonClass("secondary")}>
-                Read the keyword research guide
-              </Link>
-            </div>
-          </div>
-        </div>
-        <div id="app" className="mx-auto mt-14 max-w-[1180px] px-3 sm:px-6">
-          <AppWindow view={view} onView={setView} />
-          <p className="mt-4 px-1 text-sm text-ink-soft">
-            This is {SITE.name}, with a made-up app. Sort the keywords, switch to the UK, or open Localization and edit the
-            keyword field to see which searches it covers.
-          </p>
-        </div>
-      </section>
-
-      <section aria-labelledby="how" className="mx-auto max-w-6xl px-4 pt-28 pb-20 sm:px-6">
-        <h2 id="how" className="max-w-[22ch] text-3xl font-bold tracking-tight sm:text-[2.6rem] sm:leading-[1.1]">
-          How keyword research works in {SITE.name}
-        </h2>
-        <ol className="mt-12 grid gap-x-10 gap-y-12 md:grid-cols-2 lg:grid-cols-4">
-          {STEPS.map((step, i) => (
-            <li key={step.title} className="border-t-2 border-ink pt-5">
-              <span className="text-sm font-semibold text-ink-soft">Step {i + 1}</span>
-              <h3 className="mt-1 text-xl font-semibold">{step.title}</h3>
-              <p className="mt-3 text-ink-soft">{step.body}</p>
-              <button type="button" onClick={() => show(step.view)} className="mt-4 text-sm font-semibold underline underline-offset-4 hover:no-underline">
-                Show it in the app
-              </button>
-            </li>
-          ))}
-        </ol>
-      </section>
-
-      <section aria-labelledby="more" className="border-t border-line bg-surface">
-        <div className="mx-auto grid max-w-6xl gap-12 px-4 py-20 sm:px-6 lg:grid-cols-[1fr_2fr]">
-          <div>
-            <h2 id="more" className="text-3xl font-bold tracking-tight">
-              The rest of your product page, too
-            </h2>
-            <p className="mt-4 text-ink-soft">Keywords get people to your page. The rest of {SITE.name} helps them tap Get.</p>
-            <button type="button" onClick={() => show("audit")} className={`${buttonClass("secondary", "sm")} mt-6`}>
-              See an audit
-            </button>
-          </div>
-          <dl className="grid gap-x-10 gap-y-9 sm:grid-cols-2">
-            {rest.map((f) => (
-              <div key={f.id}>
-                <dt className="text-lg font-semibold">{f.title}</dt>
-                <dd className="mt-2 text-ink-soft">{f.body}</dd>
-              </div>
-            ))}
-            <div>
-              <dt className="text-lg font-semibold">Every country you sell in</dt>
-              <dd className="mt-2 text-ink-soft">
-                Track the same app in the US, the UK or anywhere else, and see which countries have no listing in their
-                language yet.
-              </dd>
-            </div>
-          </dl>
-        </div>
-      </section>
-
-      <section aria-labelledby="privacy" className="mx-auto grid max-w-6xl gap-12 px-4 py-20 sm:px-6 lg:grid-cols-2">
-        <div>
-          <h2 id="privacy" className="text-3xl font-bold tracking-tight">
-            Your keywords stay on your computer
-          </h2>
-          <ul className="mt-6 flex flex-col gap-3 text-ink-soft">
-            {PRIVACY_POINTS.map((p) => (
-              <li key={p} className="flex gap-3">
-                <svg viewBox="0 0 16 16" className="mt-1 size-4 shrink-0 text-up" aria-hidden="true">
-                  <path d="m3 8.5 3 3 7-7" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                </svg>
-                {p}
-              </li>
-            ))}
-          </ul>
-        </div>
-        <DataFlow />
-      </section>
-
-      <section aria-labelledby="learn" className="border-t border-line">
-        <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6">
-          <h2 id="learn" className="text-3xl font-bold tracking-tight">
-            Learn ASO keyword research
-          </h2>
-          <ul className="mt-8 grid gap-6 md:grid-cols-2">
-            {GUIDES.map((g) => (
-              <li key={g.path}>
-                <Link to={g.path} className="group block border-t-2 border-ink pt-5">
-                  <span className="text-xl font-semibold group-hover:underline group-hover:underline-offset-4">{g.h1}</span>
-                  <span className="mt-2 block max-w-[52ch] text-ink-soft">{g.description}</span>
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </div>
-      </section>
-
-      <section aria-labelledby="questions" className="border-t border-line bg-surface">
-        <div className="mx-auto max-w-3xl px-4 py-20 sm:px-6">
-          <h2 id="questions" className="text-3xl font-bold tracking-tight">
-            Questions
-          </h2>
-          <div className="mt-8 divide-y divide-line border-y border-line">
-            {FAQ.map((f) => (
-              <details key={f.q} className="group py-4">
-                <summary className="flex cursor-pointer list-none items-center justify-between gap-4 font-semibold">
-                  {f.q}
-                  <span className="text-ink-soft transition-transform group-open:rotate-45" aria-hidden="true">
-                    +
-                  </span>
-                </summary>
-                <p className="mt-3 text-ink-soft">{f.a}</p>
-              </details>
-            ))}
-          </div>
-        </div>
-      </section>
-    </>
+    <div className="flex flex-wrap justify-center gap-3">
+      <Link to="/download" className={buttonClass("primary", size)}>
+        Download for Mac
+      </Link>
+      <Link to="/download" className={buttonClass("secondary", size)}>
+        Download for Windows
+      </Link>
+    </div>
   )
 }
 
-/** Who talks to whom: the app talks to Apple; our server only handles your account. */
-function DataFlow() {
+function Home() {
   return (
-    <figure className="rounded-2xl border border-line bg-surface p-6">
-      <svg viewBox="0 0 420 220" className="w-full" role="img" aria-labelledby="flow-title">
-        <title id="flow-title">
-          Your computer talks to Apple for keywords, rankings and your listing, and to the AI you choose; the AppDoctor
-          server only handles your account and subscription.
-        </title>
-        <g fontFamily="inherit" fontSize="13" fill="var(--color-ink)">
-          <rect x="140" y="80" width="140" height="60" rx="10" fill="var(--color-tint)" stroke="var(--color-up)" />
-          <text x="210" y="106" textAnchor="middle" fontWeight="600">
-            Your computer
-          </text>
-          <text x="210" y="124" textAnchor="middle" fontSize="11" fill="var(--color-ink-soft)">
-            keywords, ranks, keys
-          </text>
+    <>
+      <section className="px-5 pt-16 text-center sm:pt-24">
+        <Mark className="mx-auto size-[76px] sm:size-[92px]" />
+        <h1 className="mx-auto mt-8 max-w-[20ch] text-[2.75rem] leading-[1.05] font-semibold tracking-[-0.035em] text-balance sm:text-[4.6rem]">
+          ASO keyword research. With Apple's own numbers.
+        </h1>
+        <p className="mx-auto mt-6 max-w-[38ch] text-[19px] leading-[1.45] text-balance text-ink-soft sm:text-[22px]">
+          Find the App Store searches worth winning, track your rank in every country, and let your own AI rewrite your
+          listing.
+        </p>
+        <div className="mt-9">
+          <Downloads />
+        </div>
+        <p className="mt-5 text-[13px] text-ink-soft">For macOS and Windows. Your keywords stay on your computer.</p>
+        <div className="mx-auto mt-16 max-w-[1200px] rounded-[28px] bg-surface p-[clamp(10px,2.6vw,36px)] sm:rounded-[40px]">
+          <AppWindow start="keywords" label="AppDoctor's keyword research, with example data" />
+        </div>
+        <p className="mx-auto mt-4 max-w-2xl text-[13px] text-ink-soft">
+          This is the app, with a made-up one. Sort the columns, switch to the UK, add a keyword.
+        </p>
+      </section>
 
-          <rect x="10" y="10" width="120" height="50" rx="10" fill="none" stroke="var(--color-line)" />
-          <text x="70" y="40" textAnchor="middle">
-            App Store
-          </text>
-          <rect x="290" y="10" width="120" height="50" rx="10" fill="none" stroke="var(--color-line)" />
-          <text x="350" y="40" textAnchor="middle">
-            Apple Ads
-          </text>
-          <rect x="10" y="160" width="120" height="50" rx="10" fill="none" stroke="var(--color-line)" />
-          <text x="70" y="190" textAnchor="middle">
-            App Store Connect
-          </text>
-          <rect x="290" y="160" width="120" height="50" rx="10" fill="none" stroke="var(--color-line)" strokeDasharray="4 3" />
-          <text x="350" y="183" textAnchor="middle">
-            {SITE.name}
-          </text>
-          <text x="350" y="199" textAnchor="middle" fontSize="11" fill="var(--color-ink-soft)">
-            sign-in and billing
-          </text>
-        </g>
-        <g stroke="var(--color-ink)" strokeWidth="1.5" fill="none">
-          <path d="M150 85 112 60" />
-          <path d="M270 85 308 60" />
-          <path d="M150 135 112 160" />
-        </g>
-        <path d="M270 135 308 160" stroke="var(--color-ink-soft)" strokeWidth="1.5" strokeDasharray="4 3" fill="none" />
-      </svg>
-    </figure>
+      {SECTIONS.map((section, i) => (
+        <section key={section.id} aria-labelledby={section.id} className={`px-5 py-24 text-center sm:py-32 ${i % 2 === 0 ? "mt-24 bg-surface sm:mt-32" : ""}`}>
+          <h2 id={section.id} className="mx-auto max-w-[18ch] text-[2.3rem] leading-[1.08] font-semibold tracking-[-0.03em] text-balance sm:text-[3.5rem]">
+            {section.title}
+          </h2>
+          <p className="mx-auto mt-5 max-w-[46ch] text-[18px] leading-[1.5] text-pretty text-ink-soft sm:text-[21px]">{section.body}</p>
+          <Link to={section.more.to} className={`${buttonClass("plain", "md")} mt-4`}>
+            {section.more.label}
+          </Link>
+          <div className={`mx-auto mt-14 max-w-[1100px] rounded-[28px] p-[clamp(8px,2vw,28px)] sm:rounded-[36px] ${i % 2 === 0 ? "bg-white" : "bg-surface"}`}>
+            <AppWindow start={section.start} ai={section.ai} height={540} />
+          </div>
+        </section>
+      ))}
+
+      <section aria-labelledby="privacy" className="mt-24 bg-black px-5 py-24 text-center text-white sm:py-32">
+        <h2 id="privacy" className="text-[2.3rem] leading-[1.08] font-semibold tracking-[-0.03em] sm:text-[3.5rem]">
+          Private by design.
+        </h2>
+        <p className="mx-auto mt-5 max-w-[44ch] text-[18px] leading-[1.5] text-white/70 sm:text-[21px]">
+          Your keywords, ranks and App Store Connect key live on your computer. Our server knows your email and your
+          subscription, and nothing else.
+        </p>
+        <dl className="mx-auto mt-16 grid max-w-[980px] gap-10 text-left sm:grid-cols-3">
+          {[
+            ["On your computer", "Everything AppDoctor learns about your apps is stored on your Mac or PC, and keys go in its keychain."],
+            ["Straight to Apple", "Searches, rank checks and listing changes go from your computer to Apple directly."],
+            ["Open source", "Read the code to check all of this, or build the app yourself for free."],
+          ].map(([title, body]) => (
+            <div key={title} className="border-t border-white/20 pt-5">
+              <dt className="text-[19px] font-semibold">{title}</dt>
+              <dd className="mt-2 text-white/65">{body}</dd>
+            </div>
+          ))}
+        </dl>
+      </section>
+
+      <section aria-label="Learn more" className="mx-auto grid max-w-[1100px] gap-5 px-5 py-24 md:grid-cols-2">
+        <Link to={KEYWORD_RESEARCH.path} className="group rounded-[28px] bg-surface p-10 transition-colors hover:bg-[#ececf0]">
+          <span className="block text-[13px] font-medium text-ink-soft">Guide</span>
+          <span className="mt-2 block text-[28px] leading-tight font-semibold tracking-[-0.02em]">{KEYWORD_RESEARCH.h1}</span>
+          <span className="mt-3 block text-ink-soft">{KEYWORD_RESEARCH.description}</span>
+          <span className="mt-5 block text-accent group-hover:underline">Read the guide</span>
+        </Link>
+        <Link to="/docs" className="group rounded-[28px] bg-surface p-10 transition-colors hover:bg-[#ececf0]">
+          <span className="block text-[13px] font-medium text-ink-soft">Docs</span>
+          <span className="mt-2 block text-[28px] leading-tight font-semibold tracking-[-0.02em]">Set up {SITE.name}</span>
+          <span className="mt-3 block text-ink-soft">
+            Install it, add your app, connect App Store Connect and Apple Ads, and bring your own AI.
+          </span>
+          <span className="mt-5 block text-accent group-hover:underline">Read the docs</span>
+        </Link>
+      </section>
+
+      <section aria-labelledby="questions" className="mx-auto max-w-[760px] px-5 pb-24">
+        <h2 id="questions" className="text-center text-[2.3rem] font-semibold tracking-[-0.03em] sm:text-[2.8rem]">
+          Questions
+        </h2>
+        <div className="mt-10 divide-y divide-line border-y border-line">
+          {FAQ.map((f) => (
+            <details key={f.q} className="group py-5">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-4 text-[17px] font-semibold">
+                {f.q}
+                <span className="text-[22px] leading-none font-light text-ink-soft transition-transform group-open:rotate-45" aria-hidden="true">
+                  +
+                </span>
+              </summary>
+              <p className="mt-3 text-[17px] leading-relaxed text-ink-soft">{f.a}</p>
+            </details>
+          ))}
+        </div>
+      </section>
+
+      <section className="bg-surface px-5 py-24 text-center">
+        <h2 className="text-[2.3rem] font-semibold tracking-[-0.03em] sm:text-[3.2rem]">Start with your own app.</h2>
+        <p className="mx-auto mt-4 max-w-[40ch] text-[19px] text-ink-soft">Paste its App Store link and check where it ranks today.</p>
+        <div className="mt-8">
+          <Downloads />
+        </div>
+      </section>
+    </>
   )
 }

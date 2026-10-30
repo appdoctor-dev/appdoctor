@@ -2,6 +2,7 @@
 title: How the keyword metrics work
 description: What popularity, difficulty and rank mean in AppDoctor, and where each number comes from.
 order: 4
+group: Keywords and ranks
 ---
 
 ## Popularity

@@ -2,6 +2,7 @@
 title: Connect App Store Connect
 description: Create an App Store Connect API key so AppDoctor can read your keyword field and update your listing.
 order: 2
+group: Connect your accounts
 ---
 
 Your public App Store listing doesn't show your keyword field. To see it, and to send listing changes back to Apple, AppDoctor needs an App Store Connect API key. The key stays on your computer, in the macOS Keychain or Windows Credential Manager, and is only ever sent to Apple.
