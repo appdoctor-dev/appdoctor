@@ -57,7 +57,7 @@ export function AppWindow({ start = "keywords", ai = false, height = 600, label 
           {view === "localization" && <LocalizationView aiOpen={aiOpen} onAi={() => toggleAi()} />}
           {view === "screenshots" && <ScreenshotsView />}
         </div>
-        {aiOpen && <AiPanel play={opened.current} onClose={() => setAiOpen(false)} />}
+        {aiOpen && view !== "screenshots" && <AiPanel play={opened.current} onClose={() => setAiOpen(false)} />}
       </div>
     </figure>
   )
@@ -72,9 +72,7 @@ function TitleBar() {
         <span className="size-3 rounded-full bg-[#28c840]" />
       </span>
       <span className="flex items-center gap-1.5 font-semibold">
-        <span className="grid size-[18px] place-items-center rounded-[5px] bg-app-accent">
-          <Icon name="pulse" className="size-3 text-white" />
-        </span>
+        <img src="/favicon.svg" alt="" className="size-[18px]" />
         AppDoctor
       </span>
       <span className="ml-auto text-[11px] text-app-muted">Example data</span>
@@ -669,39 +667,463 @@ function LocalizationView({ aiOpen, onAi }: { aiOpen: boolean; onAi: () => void 
 /* ------------------------------------------------------------------------ */
 
 const SLIDES = [
-  { headline: "Fall asleep in minutes", sub: "Rain, ocean and brown noise", from: "#3b2a8f", to: "#7c3aed" },
-  { headline: "Mix your own night", sub: "Layer up to five sounds", from: "#0f3b6e", to: "#0891b2" },
-  { headline: "Wake up gently", sub: "A sunrise alarm that fades in", from: "#7c2d12", to: "#f59e0b" },
-]
+  {
+    headline: "Fall asleep in minutes",
+    sub: "Rain, ocean and brown noise",
+    from: "#2a1d78",
+    to: "#7c3aed",
+    glow: "#c4b5fd",
+    screen: "sleep",
+  },
+  {
+    headline: "Mix your own night",
+    sub: "Layer up to five sounds",
+    from: "#0b2f5c",
+    to: "#0891b2",
+    glow: "#67e8f9",
+    screen: "mix",
+  },
+  {
+    headline: "Wake up gently",
+    sub: "A sunrise alarm that fades in",
+    from: "#6b1d0c",
+    to: "#f59e0b",
+    glow: "#fde68a",
+    screen: "alarm",
+  },
+] as const
+
+type Slide = (typeof SLIDES)[number]
+
+// A live demo, timed in ms: the reader watches someone pick the project and
+// model, type a request and send it; Claude answers, then designs the set one
+// slide after another while the chat says what it's doing.
+const DESIGN = {
+  asked: "Design three iPhone screenshots for Moonwake. Calm, night-time, and use my best keywords.",
+  intro: "On it. I'll build three slides around your strongest keywords.",
+  steps: [
+    { at: 7900, text: "Read 12 keywords and the App Store listing" },
+    { at: 8500, text: "Picked a night palette: violet, ocean, sunrise" },
+    { at: 11000, text: "Designed 1: Fall asleep in minutes" },
+    { at: 13200, text: "Designed 2: Mix your own night" },
+    { at: 15400, text: "Designed 3: Wake up gently" },
+  ],
+  reply:
+    "Done. The headlines lead with “sleep sounds” and “white noise”, your most popular keywords, and each phone shows the screen it talks about. Want an iPad set next?",
+  // The reader's side: the cursor's stops, and when the text is typed and sent.
+  cursor: [
+    { at: 400, to: "folder" },
+    { at: 1150, to: "folderItem", click: true },
+    { at: 1900, to: "model" },
+    { at: 2650, to: "modelItem", click: true },
+    { at: 3300, to: "input" },
+    { at: 6000, to: "send", click: true },
+  ] as const,
+  folderMenu: [900, 1500] as const,
+  modelMenu: [2350, 2950] as const,
+  typeAt: 3500,
+  sendAt: 6250,
+  introAt: 6700,
+  slideAt: (i: number) => 9000 + i * 2200,
+  replyAt: 15900,
+  end: 18300,
+}
+
+type Target = (typeof DESIGN.cursor)[number]["to"]
+
+/** Milliseconds into the demo; it plays the first time the window scrolls into view. */
+function useDemoClock(end: number) {
+  const ref = useRef<HTMLDivElement>(null)
+  // Server-rendered (and for reduced motion) as the finished design.
+  const [ms, setMs] = useState(Number.POSITIVE_INFINITY)
+  const [run, setRun] = useState(0)
+  useEffect(() => {
+    const node = ref.current
+    if (!node || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return
+    let frame = 0
+    const play = () => {
+      const start = performance.now()
+      const tick = (now: number) => {
+        const elapsed = now - start
+        setMs(Math.round(elapsed / 50) * 50)
+        if (elapsed < end) frame = requestAnimationFrame(tick)
+      }
+      frame = requestAnimationFrame(tick)
+    }
+    if (run > 0) {
+      play()
+      return () => cancelAnimationFrame(frame)
+    }
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry?.isIntersecting) return
+        observer.disconnect()
+        play()
+      },
+      { threshold: 0.45 },
+    )
+    observer.observe(node)
+    return () => {
+      observer.disconnect()
+      cancelAnimationFrame(frame)
+    }
+  }, [end, run])
+  return { ref, ms, done: ms >= end, replay: () => setRun((r) => r + 1) }
+}
 
 function ScreenshotsView() {
+  const { ref, ms, done, replay } = useDemoClock(DESIGN.end)
+  const active = SLIDES.findIndex((_, i) => ms >= DESIGN.slideAt(i) && ms < DESIGN.slideAt(i + 1) && i < SLIDES.length)
   return (
-    <>
-      <ViewHeader title="iPhone screenshots" sub={`${DEMO_APP.name} · 3 screenshots · 1320 × 2868`} />
-      <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto bg-black/20 p-5">
-        <div className="flex gap-3">
-          {SLIDES.map((slide) => (
-            <div
-              key={slide.headline}
-              className="flex aspect-[1320/2868] w-[clamp(84px,14vw,150px)] flex-col items-center rounded-[10px] px-2 pt-4 text-center"
-              style={{ background: `linear-gradient(170deg, ${slide.from}, ${slide.to})` }}
-            >
-              <div className="text-[clamp(10px,1.3vw,14px)] leading-tight font-bold text-white">{slide.headline}</div>
-              <div className="mt-1 text-[clamp(7px,0.8vw,9px)] text-white/75">{slide.sub}</div>
-              <div className="mt-auto mb-[-1px] h-[58%] w-[78%] rounded-t-[14px] border-[3px] border-b-0 border-[#0b0b0f] bg-[#16161c] p-1.5">
-                <div className="mx-auto h-1.5 w-8 rounded-full bg-black" />
-                <div className="mt-2 h-2 w-3/4 rounded bg-white/20" />
-                <div className="mt-1.5 h-2 w-1/2 rounded bg-white/10" />
-                <div className="mt-3 aspect-square w-full rounded-lg bg-white/[0.07]" />
-              </div>
+    <div ref={ref} className="flex min-h-0 flex-1 flex-col lg:flex-row">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <ViewHeader title="iPhone screenshots" sub={`${DEMO_APP.name} · 3 screenshots · 1320 × 2868`}>
+          {done && Number.isFinite(ms) && (
+            <button type="button" onClick={replay} className="h-7 rounded-md px-2.5 text-app-accent-soft hover:bg-white/[0.06]">
+              Replay
+            </button>
+          )}
+        </ViewHeader>
+        <div className="relative flex min-h-[340px] flex-1 items-center justify-center overflow-hidden bg-[#141417] p-5 [background-image:radial-gradient(rgb(255_255_255/0.06)_1px,transparent_1px)] [background-size:18px_18px]">
+          <div className="flex gap-[clamp(8px,1.4vw,16px)]">
+            {SLIDES.map((slide, i) => (
+              <SlideCard key={slide.headline} slide={slide} t={ms - DESIGN.slideAt(i)} editing={i === active} />
+            ))}
+          </div>
+          {ms >= DESIGN.sendAt && ms < DESIGN.replyAt && (
+            <div className="absolute top-3 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full bg-black/60 px-3 py-1 text-[11px] text-app-text ring-1 ring-white/10 backdrop-blur lg:hidden">
+              <img src="/claude.svg" alt="" className="size-3.5" /> Claude is designing…
             </div>
-          ))}
+          )}
+        </div>
+        <p className="border-t border-app-line px-4 py-2 text-[11px] text-app-muted">
+          Every iPhone and iPad size, the iOS 27 header and search art, and app preview videos.
+        </p>
+      </div>
+      <DesignChat ms={ms} />
+    </div>
+  )
+}
+
+/** One screenshot, `t` ms after Claude starts on it (negative: not yet). */
+function SlideCard({ slide, t, editing }: { slide: Slide; t: number; editing: boolean }) {
+  const painted = t >= 0
+  const typed = Math.max(0, Math.min(slide.headline.length, Math.floor((t - 300) / 32)))
+  const typing = typed > 0 && typed < slide.headline.length
+  const subbed = t >= 1100
+  const phone = t >= 1300
+  return (
+    <div className="relative">
+      <div
+        className={`@container relative aspect-[1320/2868] w-[clamp(92px,12.5vw,160px)] overflow-hidden rounded-[10px] text-center transition-shadow duration-300 ${
+          painted ? "" : "outline-1 -outline-offset-1 outline-white/15 outline-dashed"
+        } ${editing ? "shadow-[0_0_0_2px_#0a84ff]" : ""}`}
+      >
+        <div className="absolute inset-0 bg-[#232329]" />
+        <div
+          className="absolute inset-0 transition-opacity duration-700"
+          style={{
+            opacity: painted ? 1 : 0,
+            background: `radial-gradient(120% 70% at 50% 0%, ${slide.glow}55, transparent 60%), linear-gradient(170deg, ${slide.from}, ${slide.to})`,
+          }}
+        />
+        <div className="relative px-[7cqw] pt-[10cqw]">
+          {painted ? (
+            <div className="text-[10.5cqw] leading-[1.08] font-bold tracking-[-0.02em] text-white">
+              {slide.headline.slice(0, typed)}
+              {typing && <span className="ml-[0.5cqw] inline-block h-[9cqw] w-[0.9cqw] translate-y-[1cqw] bg-white" />}
+            </div>
+          ) : (
+            <div className="flex flex-col items-center gap-[2.5cqw] pt-[1cqw]">
+              <div className="h-[6cqw] w-[78%] rounded-full bg-white/10" />
+              <div className="h-[6cqw] w-[52%] rounded-full bg-white/10" />
+            </div>
+          )}
+          <div className="mt-[3cqw] text-[5.2cqw] text-white/80 transition-opacity duration-500" style={{ opacity: subbed ? 1 : 0 }}>
+            {slide.sub}
+          </div>
+        </div>
+        <div
+          className="absolute inset-x-[10%] top-[37%] bottom-[-8%] rounded-[12cqw] bg-[#0b0b0f] p-[2.2cqw] shadow-[0_6cqw_12cqw_-4cqw_rgb(0_0_0/0.6)] transition-[transform,opacity] duration-700 ease-out"
+          style={{
+            transform: phone ? "translateY(0)" : "translateY(18%)",
+            opacity: phone ? 1 : painted ? 0.35 : 0.2,
+          }}
+        >
+          <div className="relative h-full overflow-hidden rounded-[10cqw] bg-[#0e0e16] px-[6cqw] pt-[11cqw]">
+            <div className="absolute top-[3.2cqw] left-1/2 h-[5cqw] w-[24cqw] -translate-x-1/2 rounded-full bg-black" />
+            {slide.screen === "sleep" && <SleepScreen />}
+            {slide.screen === "mix" && <MixScreen />}
+            {slide.screen === "alarm" && <AlarmScreen />}
+          </div>
         </div>
       </div>
-      <p className="border-t border-app-line px-4 py-2 text-[11px] text-app-muted">
-        Every iPhone and iPad frame, the iOS 27 product page header and search art, and app preview videos at Apple's sizes.
-      </p>
-    </>
+      {editing && (
+        <span className="absolute -top-[22px] left-0 flex items-center gap-1 rounded-[5px] rounded-bl-none bg-[#d97757] px-1.5 py-0.5 text-[10px] font-semibold whitespace-nowrap text-white">
+          Claude
+        </span>
+      )}
+    </div>
+  )
+}
+
+// The three Moonwake screens inside the phones, sized in container units so
+// they scale with the slide.
+
+function SleepScreen() {
+  return (
+    <div className="flex flex-col items-center text-white">
+      <div className="self-start text-[4.6cqw] text-white/55">Tonight</div>
+      <div className="relative mt-[5cqw] grid size-[44cqw] place-items-center rounded-full bg-[radial-gradient(circle_at_50%_40%,#4c3a9e,#1b1640_70%)] shadow-[0_0_10cqw_rgb(167_139_250/0.45)]">
+        <div className="text-[11cqw] leading-none font-semibold tabular-nums">45:00</div>
+      </div>
+      <div className="mt-[4cqw] text-[4.6cqw] text-white/70">Rain on a tent</div>
+      <div className="mt-[3.5cqw] flex gap-[2cqw] text-[3.8cqw]">
+        <span className="rounded-full bg-[#7c3aed] px-[3cqw] py-[1cqw]">Rain</span>
+        <span className="rounded-full bg-white/10 px-[3cqw] py-[1cqw]">Ocean</span>
+        <span className="rounded-full bg-white/10 px-[3cqw] py-[1cqw]">Brown</span>
+      </div>
+      <div className="mt-[5cqw] grid size-[13cqw] place-items-center rounded-full bg-white">
+        <span className="ml-[1cqw] border-y-[2.6cqw] border-l-[4cqw] border-y-transparent border-l-[#1b1640]" />
+      </div>
+    </div>
+  )
+}
+
+function MixScreen() {
+  const sounds = [
+    { name: "Rain", level: 80, color: "#38bdf8" },
+    { name: "Thunder", level: 35, color: "#a78bfa" },
+    { name: "Campfire", level: 55, color: "#fb923c" },
+    { name: "Wind", level: 65, color: "#5eead4" },
+  ]
+  return (
+    <div className="text-left text-white">
+      <div className="text-[6.4cqw] font-bold">Your mix</div>
+      <div className="mt-[4cqw] flex flex-col gap-[4cqw]">
+        {sounds.map((s) => (
+          <div key={s.name}>
+            <div className="flex items-center gap-[2cqw] text-[4.4cqw]">
+              <span className="size-[3cqw] rounded-full" style={{ background: s.color }} />
+              {s.name}
+            </div>
+            <div className="mt-[1.6cqw] h-[2.2cqw] rounded-full bg-white/10">
+              <div className="h-full rounded-full" style={{ width: `${s.level}%`, background: s.color }} />
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="mt-[5cqw] rounded-full bg-[#0891b2] py-[2.2cqw] text-center text-[4.4cqw] font-semibold">Save mix</div>
+    </div>
+  )
+}
+
+function AlarmScreen() {
+  return (
+    <div className="flex flex-col items-center text-white">
+      <div className="self-start text-[4.6cqw] text-white/55">Alarm</div>
+      <div className="mt-[3cqw] text-[17cqw] leading-none font-light tracking-[-0.03em] tabular-nums">6:45</div>
+      <div className="relative mt-[4cqw] h-[16cqw] w-[48cqw] overflow-hidden">
+        <div className="absolute inset-x-0 top-0 h-[32cqw] rounded-full bg-[radial-gradient(circle_at_50%_50%,#fde68a,#f97316_55%,transparent_72%)]" />
+      </div>
+      <div className="h-[0.6cqw] w-full bg-white/15" />
+      <div className="mt-[4cqw] flex w-full items-center justify-between text-[4.2cqw]">
+        <span>Sunrise fade · 30 min</span>
+        <span className="flex h-[5.4cqw] w-[9.6cqw] items-center justify-end rounded-full bg-[#f97316] p-[0.6cqw]">
+          <span className="size-[4.2cqw] rounded-full bg-white" />
+        </span>
+      </div>
+      <div className="mt-[4cqw] flex w-full justify-between text-[3.8cqw] text-white/60">
+        {["M", "T", "W", "T", "F"].map((d, i) => (
+          <span key={i} className="grid size-[7cqw] place-items-center rounded-full bg-white/10 text-white">
+            {d}
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/** Characters of `text` streamed `ms` after `at`, `perChar` ms apart. */
+function streamed(text: string, ms: number, at: number, perChar: number) {
+  return text.slice(0, Math.max(0, Math.floor((ms - at) / perChar)))
+}
+
+/** The design chat beside the canvas, played by the clock, with the reader's cursor. */
+function DesignChat({ ms }: { ms: number }) {
+  const aside = useRef<HTMLElement>(null)
+  const spots = useRef<Partial<Record<Target, HTMLElement | null>>>({})
+  const [points, setPoints] = useState<Partial<Record<Target, { x: number; y: number }>>>({})
+  useEffect(() => {
+    const measure = () => {
+      const box = aside.current?.getBoundingClientRect()
+      if (!box) return
+      const next: Partial<Record<Target, { x: number; y: number }>> = {}
+      for (const [name, node] of Object.entries(spots.current)) {
+        const r = node?.getBoundingClientRect()
+        if (r)
+          next[name as Target] = {
+            x: r.left - box.left + Math.min(r.width / 2, 40),
+            y: r.top - box.top + r.height * 0.6,
+          }
+      }
+      setPoints(next)
+    }
+    measure()
+    window.addEventListener("resize", measure)
+    return () => window.removeEventListener("resize", measure)
+  }, [])
+
+  const live = Number.isFinite(ms)
+  const stop = [...DESIGN.cursor].reverse().find((c) => ms >= c.at)
+  const clicking = DESIGN.cursor.some((c) => "click" in c && ms >= c.at + 450 && ms < c.at + 600)
+  const cursorAt = stop && points[stop.to]
+  const menu = ms >= DESIGN.folderMenu[0] && ms < DESIGN.folderMenu[1] ? "folder" : ms >= DESIGN.modelMenu[0] && ms < DESIGN.modelMenu[1] ? "model" : null
+  const typed = ms < DESIGN.sendAt ? streamed(DESIGN.asked, ms, DESIGN.typeAt, 26) : ""
+  const sent = ms >= DESIGN.sendAt
+  const steps = DESIGN.steps.filter((s) => ms >= s.at)
+  const working = ms >= DESIGN.introAt && ms < DESIGN.replyAt
+  const set = (name: Target) => (node: HTMLElement | null) => {
+    spots.current[name] = node
+  }
+
+  return (
+    <aside ref={aside} aria-label="Design with AI" className="relative hidden w-[280px] shrink-0 flex-col border-l border-app-line bg-app-side lg:flex">
+      <div className="flex items-center gap-2 border-b border-app-line px-4 py-3">
+        <Icon name="sparkles" className="size-4 text-app-accent-soft" />
+        <span className="text-[14px] font-semibold">Design with AI</span>
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col justify-end gap-3 overflow-hidden p-4" aria-live="polite">
+        {sent && <div className="ml-6 self-end rounded-2xl rounded-br-[4px] bg-app-accent px-3 py-2 text-white">{DESIGN.asked}</div>}
+        {ms >= DESIGN.introAt && (
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-2 text-[12px] font-medium">
+              <img src="/claude.svg" alt="" className="size-4" />
+              Claude
+              <span className="font-normal text-app-muted">Opus 5.5</span>
+              {working && <span className="ml-auto size-1.5 animate-pulse rounded-full bg-[#d97757]" />}
+            </div>
+            <p className="leading-relaxed">{streamed(DESIGN.intro, ms, DESIGN.introAt, 16)}</p>
+          </div>
+        )}
+        {steps.length > 0 && (
+          <ul className="flex flex-col gap-1.5 text-[12px] text-app-muted">
+            {steps.map((step) => (
+              <li key={step.text} className="flex items-start gap-2">
+                <Icon name="check" className="mt-0.5 size-3.5 shrink-0 text-app-up" />
+                {step.text}
+              </li>
+            ))}
+          </ul>
+        )}
+        {ms >= DESIGN.replyAt && <p className="leading-relaxed">{streamed(DESIGN.reply, ms, DESIGN.replyAt, 12)}</p>}
+      </div>
+      <Composer
+        placeholder="Ask Claude to change a slide…"
+        text={typed}
+        caret={live && ms >= DESIGN.typeAt && ms < DESIGN.sendAt}
+        menu={menu}
+        hover={menu && stop ? stop.to : null}
+        spot={set}
+      />
+      {live && cursorAt && ms < DESIGN.sendAt + 500 && (
+        <svg
+          viewBox="0 0 16 24"
+          aria-hidden="true"
+          className="pointer-events-none absolute top-0 left-0 z-20 h-[22px] w-[15px] drop-shadow-[0_1px_2px_rgb(0_0_0/0.5)] transition-transform duration-500 ease-in-out"
+          style={{
+            transform: `translate(${cursorAt.x}px, ${cursorAt.y}px) scale(${clicking ? 0.85 : 1})`,
+          }}
+        >
+          <path d="M1 1v18l5-4.5 3.4 7.5 3-1.4-3.3-7.3H16L1 1Z" fill="#fff" stroke="#000" strokeWidth="1.3" strokeLinejoin="round" />
+        </svg>
+      )}
+    </aside>
+  )
+}
+
+const FOLDERS = ["moonwake", "moonwake-web"]
+const MODELS = ["Opus 5.5", "Sonnet 5.5", "Haiku 5.5"]
+
+/**
+ * The message box under both AI panels: the project folder, the AI and its
+ * model, as in the app. The design demo drives it (typed text, open menus,
+ * the item under the cursor) and measures its parts with `spot`.
+ */
+function Composer({
+  placeholder,
+  text = "",
+  caret = false,
+  menu = null,
+  hover = null,
+  spot,
+}: {
+  placeholder: string
+  text?: string
+  caret?: boolean
+  menu?: "folder" | "model" | null
+  hover?: Target | null
+  spot?: (name: Target) => (node: HTMLElement | null) => void
+}) {
+  const menuClass = (open: boolean) =>
+    `absolute bottom-full left-0 z-10 mb-1.5 w-[150px] rounded-lg bg-[#2d2d33] p-1 text-[12px] shadow-[0_8px_24px_rgb(0_0_0/0.45)] ring-1 ring-white/10 transition-opacity duration-150 ${open ? "opacity-100" : "pointer-events-none opacity-0"}`
+  const item = (active: boolean) => `flex items-center justify-between rounded-md px-2 py-1 ${active ? "bg-app-accent text-white" : ""}`
+  return (
+    <div className="border-t border-app-line p-3">
+      <div className="rounded-xl bg-white/[0.05] p-2 ring-1 ring-app-line">
+        <div ref={spot?.("input")} className="min-h-[36px] px-1 pb-2 leading-snug">
+          {text || caret ? (
+            <>
+              {text}
+              {caret && <span className="ml-px inline-block h-[13px] w-px translate-y-[2px] animate-pulse bg-app-text" />}
+            </>
+          ) : (
+            <span className="text-app-muted">{placeholder}</span>
+          )}
+        </div>
+        <div className="flex items-center gap-0.5 text-[11px] whitespace-nowrap text-app-muted">
+          <span className="relative">
+            <span
+              ref={spot?.("folder")}
+              className={`flex items-center gap-1 rounded px-1.5 py-0.5 ${menu === "folder" ? "bg-white/[0.08] text-app-text" : ""}`}
+            >
+              <Icon name="folder" className="size-3" /> moonwake
+            </span>
+            <div className={menuClass(menu === "folder")} aria-hidden={menu !== "folder"}>
+              <div className="px-2 pt-1 pb-1.5 text-[10px] text-app-muted">Project</div>
+              {FOLDERS.map((name, i) => (
+                <div key={name} ref={i === 0 ? spot?.("folderItem") : undefined} className={item(menu === "folder" && hover === "folderItem" && i === 0)}>
+                  {name}
+                  {i === 0 && <Icon name="check" className="size-3" />}
+                </div>
+              ))}
+              <div className="my-1 h-px bg-white/10" />
+              <div className="px-2 py-1">Choose folder…</div>
+            </div>
+          </span>
+          <span className="flex items-center gap-1 rounded px-1.5 py-0.5" title="Claude Code">
+            <img src="/claude.svg" alt="" className="size-3" /> Claude
+          </span>
+          <span className="relative">
+            <span ref={spot?.("model")} className={`block rounded px-1.5 py-0.5 ${menu === "model" ? "bg-white/[0.08] text-app-text" : ""}`}>
+              Opus 5.5
+            </span>
+            <div className={menuClass(menu === "model")} aria-hidden={menu !== "model"}>
+              <div className="px-2 pt-1 pb-1.5 text-[10px] text-app-muted">Model</div>
+              {MODELS.map((name, i) => (
+                <div key={name} ref={i === 0 ? spot?.("modelItem") : undefined} className={item(menu === "model" && hover === "modelItem" && i === 0)}>
+                  {name}
+                  {i === 0 && <Icon name="check" className="size-3" />}
+                </div>
+              ))}
+            </div>
+          </span>
+          <span ref={spot?.("send")} className="ml-auto grid size-5 place-items-center rounded-full bg-app-accent text-white">
+            ↑
+          </span>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -731,6 +1153,11 @@ function AiPanel({ play, onClose }: { play: boolean; onClose: () => void }) {
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-4" aria-live="polite">
         <div className="ml-8 self-end rounded-2xl rounded-br-[4px] bg-app-accent px-3 py-2 text-white">{DEMO_CHAT.asked}</div>
+        <div className="flex items-center gap-2 text-[12px] font-medium">
+          <img src="/claude.svg" alt="" className="size-4" />
+          Claude
+          <span className="font-normal text-app-muted">Opus 5.5</span>
+        </div>
         <ul className="flex flex-col gap-1.5 text-[12px] text-app-muted">
           {DEMO_CHAT.steps.slice(0, shown).map((step) => (
             <li key={step} className="flex items-center gap-2">
@@ -741,20 +1168,7 @@ function AiPanel({ play, onClose }: { play: boolean; onClose: () => void }) {
         </ul>
         {shown > DEMO_CHAT.steps.length && <p className="leading-relaxed">{DEMO_CHAT.reply}</p>}
       </div>
-      <div className="border-t border-app-line p-3">
-        <div className="rounded-xl bg-white/[0.05] p-2 ring-1 ring-app-line">
-          <div className="px-1 pb-2 text-app-muted">Ask about your listing, keywords…</div>
-          <div className="flex items-center gap-2 text-[11px] text-app-muted">
-            <span className="flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-white/[0.06]">
-              <Icon name="folder" className="size-3" /> moonwake
-            </span>
-            <span className="flex items-center gap-1 rounded px-1.5 py-0.5">
-              <span className="size-2 rounded-full bg-[#d97757]" /> Claude Code
-            </span>
-            <span className="ml-auto grid size-5 place-items-center rounded-full bg-app-accent text-white">↑</span>
-          </div>
-        </div>
-      </div>
+      <Composer placeholder="Ask about your listing, keywords…" />
     </aside>
   )
 }
