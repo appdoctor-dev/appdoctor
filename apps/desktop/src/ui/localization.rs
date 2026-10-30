@@ -23,7 +23,8 @@ use crate::runtime;
 use crate::services::Services;
 use crate::state::{AppState, Section};
 use crate::theme::meter;
-use crate::ui::widgets::{self, card, pill, status_dot};
+use crate::ui::controls;
+use crate::ui::widgets::{self, pill, status_dot};
 
 const NAME_LIMIT: usize = 30;
 const SUBTITLE_LIMIT: usize = 30;
@@ -430,20 +431,11 @@ impl LocalizationView {
                 .w(px(540.))
                 .child(
                     v_flex()
-                        .gap_2()
-                        .child(
-                            div()
-                                .text_sm()
-                                .text_color(theme.muted_foreground)
-                                .child("These fields change on App Store Connect. Apple shows them with the next release (promotional text, right away)."),
-                        )
-                        .children(changes.lines.iter().map(|(label, value)| {
-                            h_flex()
-                                .gap_3()
-                                .text_sm()
-                                .child(div().w(px(120.)).flex_shrink_0().text_color(theme.muted_foreground).child(label.clone()))
-                                .child(div().flex_1().child(value.clone()))
-                        })),
+                        .gap(px(12.))
+                        .child(div().text_size(px(13.)).text_color(theme.muted_foreground).child(
+                            "These fields change on App Store Connect. Apple shows them with the next release (promotional text, right away).",
+                        ))
+                        .child(controls::summary(changes.lines.clone(), cx)),
                 )
                 .footer(
                     h_flex()
@@ -635,39 +627,48 @@ impl LocalizationView {
         cx.notify();
     }
 
-    fn counted_field(
-        &self,
-        label: &str,
-        count: usize,
-        limit: usize,
-        enabled: bool,
-        field: AnyElement,
-        cx: &App,
-    ) -> impl IntoElement {
+    /// A stacked group row: the label and its character count above the
+    /// field, the count red once it's over Apple's limit.
+    fn counted_field(label: &str, count: usize, limit: usize, enabled: bool, field: AnyElement, cx: &App) -> Div {
+        let theme = cx.theme();
         let over = count > limit;
         v_flex()
-            .gap_1()
+            .px(px(10.))
+            .pt(px(9.))
+            .pb(px(10.))
+            .gap(px(7.))
             .child(
                 h_flex()
-                    .text_xs()
-                    .child(div().flex_1().font_weight(FontWeight::MEDIUM).child(label.to_owned()))
+                    .gap_2()
+                    .items_center()
+                    .child(
+                        div()
+                            .flex_1()
+                            .text_size(px(13.))
+                            .text_color(theme.foreground.opacity(0.85))
+                            .child(label.to_owned()),
+                    )
                     .when(!enabled, |this| {
-                        this.child(div().pr_2().text_color(cx.theme().muted_foreground).child("read-only"))
+                        this.child(
+                            div()
+                                .text_size(px(11.))
+                                .text_color(theme.muted_foreground)
+                                .child("Read-only"),
+                        )
                     })
                     .child(
                         div()
-                            .text_color(if over {
-                                cx.theme().danger
-                            } else {
-                                cx.theme().muted_foreground
-                            })
+                            .text_size(px(12.))
+                            .when(over, |this| this.font_weight(FontWeight::SEMIBOLD))
+                            .text_color(if over { theme.danger } else { theme.muted_foreground })
                             .child(format!("{count}/{limit}")),
                     ),
             )
             .child(field)
     }
 
-    fn keyword_helper(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    /// Notes on the keyword field, or nothing when there's nothing to say.
+    fn keyword_helper(&self, cx: &mut Context<Self>) -> Option<Div> {
         let name = Self::value(&self.fields.name, cx);
         let subtitle = Self::value(&self.fields.subtitle, cx);
         let keywords = Self::value(&self.fields.keywords, cx);
@@ -701,12 +702,22 @@ impl LocalizationView {
             h_flex()
                 .gap_2()
                 .items_center()
-                .text_xs()
+                .text_size(px(12.))
                 .child(status_dot(color))
                 .child(div().text_color(theme.muted_foreground).child(text))
         };
-        v_flex()
-            .gap_1p5()
+        let anything = !wasted.is_empty()
+            || !repeated.is_empty()
+            || spaces > 0
+            || !covered.is_empty()
+            || !uncovered.is_empty();
+        if !anything {
+            return None;
+        }
+        let notes = v_flex()
+            .gap(px(6.))
+            .px(px(10.))
+            .py(px(10.))
             .when(!wasted.is_empty(), |this| {
                 this.child(note(
                     theme.warning,
@@ -752,7 +763,8 @@ impl LocalizationView {
                                 )
                         })),
                 )
-            })
+            });
+        Some(notes)
     }
 }
 
@@ -842,7 +854,6 @@ impl Render for LocalizationView {
             .child(
                 Button::new("load-localizations")
                     .small()
-                    .outline()
                     .icon(IconName::RefreshCw)
                     .label(if self.loaded.is_some() {
                         "Reload"
@@ -867,51 +878,79 @@ impl Render for LocalizationView {
                 .into_any_element();
         };
 
+        let rows = loaded.locales.iter().map(|locale| {
+            let code = locale.code.clone();
+            let active = self.selected.as_deref() == Some(code.as_str());
+            let (text, subtext) = if active {
+                (theme.primary_foreground, theme.primary_foreground.opacity(0.75))
+            } else {
+                (theme.foreground, theme.muted_foreground)
+            };
+            v_flex()
+                .id(SharedString::from(format!("locale-{code}")))
+                .px(px(8.))
+                .py(px(5.))
+                .rounded(px(7.))
+                .cursor_pointer()
+                .map(|this| {
+                    if active {
+                        this.bg(theme.primary)
+                    } else {
+                        this.hover(|style| style.bg(theme.foreground.opacity(0.05)))
+                    }
+                })
+                .child(div().text_size(px(13.)).text_color(text).child(locale_name(&code)))
+                .child(
+                    div().text_size(px(11.)).text_color(subtext).truncate().child(
+                        locale
+                            .info
+                            .as_ref()
+                            .and_then(|i| i.name.clone())
+                            .unwrap_or_else(|| code.clone()),
+                    ),
+                )
+                .on_click(cx.listener(move |this, _, window, cx| this.select(&code, window, cx)))
+        });
         let locale_list = v_flex()
-            .id("locale-list")
             .w(px(220.))
             .flex_shrink_0()
             .h_full()
-            .overflow_y_scroll()
+            .bg(theme.sidebar)
             .border_r_1()
-            .border_color(theme.border)
-            .p_2()
-            .gap_0p5()
-            .children(loaded.locales.iter().map(|locale| {
-                let code = locale.code.clone();
-                let active = self.selected.as_deref() == Some(code.as_str());
-                v_flex()
-                    .id(SharedString::from(format!("locale-{code}")))
-                    .px_2()
-                    .py_1p5()
-                    .rounded(theme.radius)
-                    .cursor_pointer()
-                    .map(|this| {
-                        if active {
-                            this.bg(theme.accent)
-                        } else {
-                            this.hover(|style| style.bg(theme.accent.opacity(0.6)))
-                        }
-                    })
+            .border_color(theme.sidebar_border)
+            .child(
+                h_flex()
+                    .h(px(28.))
+                    .mt(px(10.))
+                    .px(px(14.))
+                    .items_center()
+                    .justify_between()
                     .child(
                         div()
-                            .text_sm()
-                            .font_weight(FontWeight::MEDIUM)
-                            .child(locale_name(&code)),
+                            .text_size(px(13.))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child("Languages"),
                     )
                     .child(
-                        div().text_xs().text_color(theme.muted_foreground).truncate().child(
-                            locale
-                                .info
-                                .as_ref()
-                                .and_then(|i| i.name.clone())
-                                .unwrap_or_else(|| code.clone()),
-                        ),
-                    )
-                    .on_click(cx.listener(move |this, _, window, cx| this.select(&code, window, cx)))
-            }))
+                        div()
+                            .text_size(px(12.))
+                            .text_color(theme.muted_foreground)
+                            .child(loaded.locales.len().to_string()),
+                    ),
+            )
             .child(
-                div().pt_2().child(
+                v_flex()
+                    .id("locale-list")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .px(px(8.))
+                    .py(px(4.))
+                    .gap(px(1.))
+                    .children(rows),
+            )
+            .child(
+                div().p(px(8.)).border_t_1().border_color(theme.sidebar_border).child(
                     Select::new(&self.add_locale)
                         .small()
                         .placeholder("Add language…")
@@ -921,84 +960,153 @@ impl Render for LocalizationView {
 
         let count = |state: &Entity<InputState>, cx: &App| state.read(cx).value().chars().count();
         let area_count = |state: &Entity<TextareaState>, cx: &App| state.read(cx).value().chars().count();
+        let line = |state: &Entity<InputState>, on: bool, cx: &App| {
+            controls::well(cx)
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .child(Input::new(state).appearance(false).small().disabled(!on)),
+                )
+                .into_any_element()
+        };
+        let area = |state: &Entity<TextareaState>, on: bool, cx: &App| {
+            controls::well(cx)
+                .items_start()
+                .py(px(4.))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .child(Textarea::new(state).appearance(false).disabled(!on)),
+                )
+                .into_any_element()
+        };
         let info_on = loaded.info_editable;
         let version_on = loaded.version_editable;
-        let editor = v_flex()
-            .id("locale-editor")
-            .flex_1()
-            .min_w_0()
-            .h_full()
-            .overflow_y_scroll()
-            .p_5()
-            .gap_4()
-            .when(!info_on || !version_on, |this| {
-                this.child(div().text_xs().text_color(theme.muted_foreground).child(
-                    "Name and subtitle need an app info that isn't live yet, and the other fields need a version being prepared. Create the next version in App Store Connect to edit everything.",
-                ))
-            })
-            .child(
-                h_flex()
-                    .gap_4()
-                    .child(div().flex_1().child(self.counted_field(
+        let fields = &self.fields;
+
+        let app_info = v_flex()
+            .child(controls::heading("App info", cx))
+            .child(controls::rows(
+                [
+                    Self::counted_field(
                         "Name",
-                        count(&self.fields.name, cx),
+                        count(&fields.name, cx),
                         NAME_LIMIT,
                         info_on,
-                        Input::new(&self.fields.name).disabled(!info_on).into_any_element(),
+                        line(&fields.name, info_on, cx),
                         cx,
-                    )))
-                    .child(div().flex_1().child(self.counted_field(
+                    )
+                    .into_any_element(),
+                    Self::counted_field(
                         "Subtitle",
-                        count(&self.fields.subtitle, cx),
+                        count(&fields.subtitle, cx),
                         SUBTITLE_LIMIT,
                         info_on,
-                        Input::new(&self.fields.subtitle).disabled(!info_on).into_any_element(),
+                        line(&fields.subtitle, info_on, cx),
                         cx,
-                    ))),
-            )
-            .child(self.counted_field(
+                    )
+                    .into_any_element(),
+                ],
+                cx,
+            ))
+            .when(!info_on, |this| {
+                this.child(controls::footnote(
+                    "Name and subtitle can change only while the app's information isn't live. Create the next version in App Store Connect to edit them.",
+                    cx,
+                ))
+            });
+
+        let mut search_rows = vec![
+            Self::counted_field(
                 "Keywords",
-                count(&self.fields.keywords, cx),
+                count(&fields.keywords, cx),
                 KEYWORDS_LIMIT,
                 version_on,
-                Input::new(&self.fields.keywords).disabled(!version_on).into_any_element(),
+                line(&fields.keywords, version_on, cx),
+                cx,
+            )
+            .into_any_element(),
+        ];
+        if let Some(helper) = self.keyword_helper(cx) {
+            search_rows.push(helper.into_any_element());
+        }
+        let search = v_flex()
+            .child(controls::heading("Search", cx))
+            .child(controls::rows(search_rows, cx))
+            .child(controls::footnote(
+                "Separate keywords with commas, no spaces. Words already in the name or subtitle don't need repeating.",
+                cx,
+            ));
+
+        let version = v_flex()
+            .child(controls::heading("Version", cx))
+            .child(controls::rows(
+                [
+                    Self::counted_field(
+                        "Promotional text",
+                        count(&fields.promo, cx),
+                        PROMO_LIMIT,
+                        version_on,
+                        line(&fields.promo, version_on, cx),
+                        cx,
+                    )
+                    .into_any_element(),
+                    Self::counted_field(
+                        "Description",
+                        area_count(&fields.description, cx),
+                        DESCRIPTION_LIMIT,
+                        version_on,
+                        area(&fields.description, version_on, cx),
+                        cx,
+                    )
+                    .into_any_element(),
+                    Self::counted_field(
+                        "What's New",
+                        area_count(&fields.whats_new, cx),
+                        WHATS_NEW_LIMIT,
+                        version_on,
+                        area(&fields.whats_new, version_on, cx),
+                        cx,
+                    )
+                    .into_any_element(),
+                ],
                 cx,
             ))
-            .child(card(cx).p_3().gap_2().child(self.keyword_helper(cx)))
-            .child(self.counted_field(
-                "Promotional text",
-                count(&self.fields.promo, cx),
-                PROMO_LIMIT,
-                version_on,
-                Input::new(&self.fields.promo).disabled(!version_on).into_any_element(),
+            .child(controls::footnote(
+                if version_on {
+                    "Keywords, description and What's New go live with the version; promotional text changes right away."
+                } else {
+                    "Keywords and these fields change only while a version is being prepared. Create the next version in App Store Connect to edit them."
+                },
                 cx,
-            ))
-            .child(self.counted_field(
-                "Description",
-                area_count(&self.fields.description, cx),
-                DESCRIPTION_LIMIT,
-                version_on,
-                Textarea::new(&self.fields.description).disabled(!version_on).into_any_element(),
-                cx,
-            ))
-            .child(self.counted_field(
-                "What's New",
-                area_count(&self.fields.whats_new, cx),
-                WHATS_NEW_LIMIT,
-                version_on,
-                Textarea::new(&self.fields.whats_new).disabled(!version_on).into_any_element(),
-                cx,
-            ))
-            .child(
-                h_flex().child(
-                    Button::new("save-localization")
-                        .primary()
-                        .label("Review and save…")
-                        .loading(self.saving)
-                        .disabled(self.saving || self.selected.is_none() || (!info_on && !version_on))
-                        .on_click(cx.listener(|this, _, window, cx| this.confirm_save(window, cx))),
-                ),
-            );
+            ));
+
+        let editor = div().id("locale-editor").flex_1().min_w_0().h_full().overflow_y_scroll().child(
+            h_flex().w_full().justify_center().child(
+                v_flex()
+                    .w_full()
+                    .max_w(px(720.))
+                    .px_6()
+                    .pt(px(22.))
+                    .pb(px(40.))
+                    .gap(px(24.))
+                    .child(app_info)
+                    .child(search)
+                    .child(version)
+                    .child(
+                        h_flex().justify_end().child(
+                            Button::new("save-localization")
+                                .primary()
+                                .label("Review and Save…")
+                                .loading(self.saving)
+                                .disabled(self.saving || self.selected.is_none() || (!info_on && !version_on))
+                                .on_click(cx.listener(|this, _, window, cx| this.confirm_save(window, cx))),
+                        ),
+                    ),
+            ),
+        );
 
         v_flex()
             .size_full()
