@@ -1,0 +1,12 @@
+[package]
+name = "appdoctor-audit"
+description = "An App Store optimization audit of one app, from what AppDoctor knows about it."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+appdoctor-screenshots.workspace = true
+appdoctor-store.workspace = true
+serde = { workspace = true, features = ["derive"] }

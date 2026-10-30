@@ -1,0 +1,15 @@
+[package]
+name = "appdoctor-jwt"
+description = "ES256 JWTs signed locally with P-256 keys, for Apple's APIs."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+base64.workspace = true
+p256.workspace = true
+rand.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
