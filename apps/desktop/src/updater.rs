@@ -192,7 +192,13 @@ fn is_newer(candidate: &str, current: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_newer, replace, verify};
+    use super::{PUBLIC_KEY, is_newer, replace, verify};
+
+    /// A malformed key would quietly turn off installing updates.
+    #[test]
+    fn the_update_key_is_a_valid_public_key() {
+        assert!(appdoctor_entitlement::parse_public_key(PUBLIC_KEY).is_ok());
+    }
 
     // A throwaway key pair; the signature is what the release workflow's
     // `openssl pkeyutl -sign -rawin` makes for "AppDoctor update".
