@@ -20,6 +20,7 @@ pub mod motion;
 mod render;
 mod svg;
 mod text;
+pub mod themes;
 
 use std::path::Path;
 
@@ -28,10 +29,13 @@ use resvg::usvg;
 use serde::{Deserialize, Serialize};
 
 pub use device::{DeviceGeometry, DeviceModel, Frame, device_geometry};
-pub use motion::{Drift, Effect, Motion, Transition, Video};
+pub use motion::{Drift, Effect, Focus, Motion, Transition, Video};
 pub use render::{ClipSource, NoClips, render_frame, render_png, render_png_with, render_slide};
 pub use svg::to_svg;
-pub use text::{DEFAULT_FONT, SUGGESTED_FONTS, Style, font_families, has_font, warm_fonts, wrap, wrap_styled};
+pub use themes::{THEMES, Theme, theme};
+pub use text::{
+    DEFAULT_FONT, SUGGESTED_FONTS, Style, Word, font_families, has_font, strip_marks, warm_fonts, wrap, wrap_styled,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -285,6 +289,12 @@ pub struct Slide {
     /// Seconds the slide shows as a scene, when the design is a video.
     #[serde(default = "default_scene", skip_serializing_if = "is_default_scene")]
     pub duration: f32,
+    /// Degrees a gradient background turns each second of the scene.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub spin: f32,
+    /// Camera moves over the scene: zooms in on a point and back out.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub camera: Vec<Focus>,
 }
 
 fn default_scene() -> f32 {
@@ -337,6 +347,10 @@ fn is_zero(value: &f32) -> bool {
     *value == 0.
 }
 
+fn is_one(value: &f32) -> bool {
+    *value == 1.
+}
+
 /// Whether a file is a video (a screen recording) rather than an image.
 pub fn is_video(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
@@ -357,6 +371,9 @@ pub enum LayerKind {
         font: Option<String>,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         italic: bool,
+        /// The colour of words marked `*like this*` in the text.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        accent: Option<String>,
     },
     Device {
         #[serde(default)]
@@ -369,6 +386,9 @@ pub enum LayerKind {
         /// Seconds into the screen recording that it starts playing.
         #[serde(default, skip_serializing_if = "is_zero")]
         clip_start: f32,
+        /// How fast the recording plays: 2 is twice as fast.
+        #[serde(default = "one", skip_serializing_if = "is_one")]
+        clip_speed: f32,
     },
     Image {
         file: Option<String>,
@@ -378,6 +398,17 @@ pub enum LayerKind {
     Shape {
         fill: String,
         radius: f32,
+        /// How much of the fill shows: 0 for an outline only.
+        #[serde(default = "one", skip_serializing_if = "is_one")]
+        fill_opacity: f32,
+        /// An outline in this colour, `stroke_width` canvas pixels wide.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stroke: Option<String>,
+        #[serde(default, skip_serializing_if = "is_zero")]
+        stroke_width: f32,
+        /// Blur in canvas pixels: a soft glow rather than a hard shape.
+        #[serde(default, skip_serializing_if = "is_zero")]
+        soft: f32,
     },
 }
 
@@ -424,7 +455,17 @@ impl Layer {
     /// and the export both draw these.
     pub fn lines(&self) -> Vec<String> {
         match (&self.kind, self.text_style()) {
-            (LayerKind::Text { text, size, .. }, Some(style)) => wrap_styled(text, style, *size, self.width),
+            (LayerKind::Text { text, size, .. }, Some(style)) => {
+                wrap_styled(&strip_marks(text), style, *size, self.width)
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// [`Layer::lines`] as words, with which are accented and their order.
+    pub fn words(&self) -> Vec<Vec<Word>> {
+        match &self.kind {
+            LayerKind::Text { text, .. } => text::words_by_line(text, &self.lines()),
             _ => Vec::new(),
         }
     }
@@ -451,6 +492,7 @@ impl Layer {
                 align: Align::Center,
                 font: None,
                 italic: false,
+                accent: None,
             },
         };
         layer.fit_text();
@@ -485,6 +527,7 @@ impl Layer {
                 screenshot: None,
                 shadow: true,
                 clip_start: 0.,
+                clip_speed: 1.,
             },
         }
     }
@@ -527,6 +570,10 @@ impl Layer {
             kind: LayerKind::Shape {
                 fill: "#ffffff".into(),
                 radius: 48.,
+                fill_opacity: 1.,
+                stroke: None,
+                stroke_width: 0.,
+                soft: 0.,
             },
         }
     }
@@ -560,6 +607,8 @@ impl Slide {
                         Layer::device(target, id(), device_y),
                     ],
                     duration: motion::DEFAULT_SCENE,
+                    spin: 0.,
+                    camera: Vec::new(),
                 }
             }
             // Wide: the words on the left, a phone on the right, all inside
@@ -582,6 +631,8 @@ impl Slide {
                     background: gradient,
                     layers: vec![title, sub, device],
                     duration: motion::DEFAULT_SCENE,
+                    spin: 0.,
+                    camera: Vec::new(),
                 }
             }
             Target::Search => {
@@ -591,6 +642,8 @@ impl Slide {
                     background: gradient,
                     layers: vec![title, device],
                     duration: motion::DEFAULT_SCENE,
+                    spin: 0.,
+                    camera: Vec::new(),
                 }
             }
         }

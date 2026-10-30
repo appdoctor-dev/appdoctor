@@ -90,13 +90,29 @@ the open-source app-store-scraper.
 
 **MCP server** (`crates/mcp`). `appdoctor mcp` runs the same binary as a
 JSON-RPC server on stdin and stdout, with no window and no network. Today it
-has 18 design tools:
+has 29 tools:
 - reading: `list_apps`, `get_design`, `design_options`, `list_fonts`;
 - editing: `add_slide`, `delete_slide`, `move_slide`, `set_background`,
   `add_layer`, `update_layer`, `delete_layer`, `arrange_layer`;
-- video: `set_video`, `update_slide` (scene length), and motion properties
-  on `add_layer` and `update_layer` (enter, exit, comes_in_at, leaves_at,
-  drift, clip_start);
+- video: `set_video`, `update_slide` (scene length, background spin), and
+  motion properties on `add_layer` and `update_layer` (enter, exit,
+  comes_in_at, leaves_at, drift, clip_start, clip_speed);
+- creative:
+  - `create_video` builds a whole storyboard in one call. Each scene takes a
+    headline (accent words `*marked*`), a subtitle, a screen, a layout
+    (device-bottom, device-top, device-right, device-left, full-screen,
+    text-only), zooms and callouts, with motion set for you.
+  - `list_themes` and `apply_theme` offer eight looks: aurora, sunset,
+    ocean, mint, paper, neon, candy and mono.
+  - `set_camera` zooms in on a point of a device's screen and back out.
+  - `add_callout` adds a tap ripple, a ring, a badge or a glow.
+  - `render_storyboard` returns one contact-sheet image of the whole video.
+  - `review_video` flags length, reading time, contrast, text over the
+    screen, frozen recordings, the header's safe area, static scenes and
+    layers off the canvas;
+- simulator: `simulator_devices`, `simulator_screenshot`,
+  `record_simulator` and `simulator_open_url`, through `xcrun simctl`, for
+  agents without a terminal;
 - output: `render_slide` and `render_frame` (any moment of the video), which
   return PNGs the agent can look at, then `export_screenshots` and
   `export_video`.

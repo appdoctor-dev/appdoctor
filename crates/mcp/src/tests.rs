@@ -271,3 +271,83 @@ fn makes_a_video_with_a_screen_recording() {
     let length = appdoctor_video::clip_duration(std::path::Path::new(written)).unwrap();
     assert!((length - 5.).abs() < 0.2, "{length}");
 }
+
+#[test]
+fn storyboards_themes_cameras_callouts_and_reviews() {
+    let dir = data_dir("creative");
+    let server = Server::new(dir.clone());
+    // A plain screenshot to put in the devices.
+    let shot = dir.join("shot.png");
+    let mut image = appdoctor_screenshots::tiny_skia::Pixmap::new(300, 650).unwrap();
+    image.fill(appdoctor_screenshots::tiny_skia::Color::from_rgba8(240, 240, 245, 255));
+    image.save_png(&shot).unwrap();
+    let shot = shot.display().to_string();
+
+    let made = call_json(
+        &server,
+        "create_video",
+        json!({
+            "app_id": APP,
+            "theme": "sunset",
+            "scenes": [
+                { "headline": "Sleep *better* tonight", "layout": "text-only" },
+                { "headline": "Guided calm", "subtitle": "Two minutes a night", "screen": shot,
+                  "zoom": [{ "at": 1, "x": 0.5, "y": 0.8 }],
+                  "callouts": [{ "kind": "tap", "at": 1.2, "x": 0.5, "y": 0.8 }, { "kind": "badge", "at": 0.5, "x": 0.8, "y": 0.1, "text": "New" }] },
+                { "headline": "Track your nights", "screen": shot, "layout": "device-top" },
+                { "headline": "Wake up refreshed", "screen": shot, "layout": "full-screen", "duration": 4 }
+            ]
+        }),
+    );
+    assert_eq!(made["scenes"], 4);
+    let design = call_json(&server, "get_design", json!({ "app_id": APP }));
+    assert!(design["video"].is_object());
+    let slides = design["slides"].as_array().unwrap();
+    assert_eq!(slides[1]["camera"].as_array().unwrap().len(), 1);
+    let kinds: Vec<&str> = slides[1]["layers"].as_array().unwrap().iter().map(|l| l["name"].as_str().unwrap()).collect();
+    assert!(kinds.contains(&"Tap") && kinds.contains(&"Badge"), "{kinds:?}");
+    // The theme coloured the words and their accent.
+    let headline = slides[0]["layers"].as_array().unwrap().iter().find(|l| l["kind"]["type"] == "text").unwrap();
+    assert_eq!(headline["kind"]["accent"], "#fde047");
+    assert_eq!(headline["motion"]["enter"], "words");
+
+    call_json(&server, "apply_theme", json!({ "app_id": APP, "theme": "paper" }));
+    let device_id = slides[2]["layers"].as_array().unwrap().iter().find(|l| l["kind"]["type"] == "device").unwrap()["id"]
+        .as_u64()
+        .unwrap();
+    call_json(
+        &server,
+        "set_camera",
+        json!({ "app_id": APP, "slide": 2, "device_id": device_id, "zooms": [{ "at": 0.5, "x": 0.3, "y": 0.4, "zoom": 2.5 }] }),
+    );
+    call_json(
+        &server,
+        "add_callout",
+        json!({ "app_id": APP, "slide": 2, "device_id": device_id, "kind": "ring", "at": 0.8, "x": 0.5, "y": 0.5 }),
+    );
+
+    let (content, failed) = call(&server, "render_storyboard", json!({ "app_id": APP, "every": 1.0 }));
+    assert!(!failed, "{content:?}");
+    assert_eq!(content[0]["type"], "image");
+    if let Ok(out) = std::env::var("APPDOCTOR_STORYBOARD_OUT") {
+        use base64::Engine as _;
+        let png = base64::engine::general_purpose::STANDARD.decode(content[0]["data"].as_str().unwrap()).unwrap();
+        std::fs::write(out, png).unwrap();
+    }
+
+    let review = call_json(&server, "review_video", json!({ "app_id": APP }));
+    let problems: Vec<String> = review["issues"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["problem"].as_str().unwrap().to_owned())
+        .collect();
+    // 13.5 s is too short for an app preview.
+    assert!(problems.iter().any(|p| p.contains("short")), "{problems:?}");
+
+    let tools = request(&server, 9, "tools/list", json!({}));
+    let names: Vec<&str> = tools["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
+    for expected in ["create_video", "render_storyboard", "review_video", "record_simulator", "simulator_open_url"] {
+        assert!(names.contains(&expected), "{expected}");
+    }
+}

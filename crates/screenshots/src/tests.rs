@@ -39,7 +39,8 @@ fn svg_escapes_text_hides_hidden_layers_and_sanitises_colors() {
     }
     slide.layers[1].hidden = true;
     let svg = to_svg(std::slice::from_ref(&slide), 0, CanvasSize::Iphone69);
-    assert!(svg.contains("Tasks &amp; &lt;notes&gt;"));
+    // Each word is its own span, escaped.
+    assert!(svg.contains(">&amp; <") && svg.contains(">&lt;notes&gt;<"));
     assert!(!svg.contains("onload"));
     assert!(!svg.contains("One line on why it matters"));
     assert!(svg.contains(r#"width="1320" height="2868""#));
@@ -302,4 +303,26 @@ fn header_and_search_art_render_at_apple_sizes() {
     let mut id = 0;
     let header = Slide::starter(Target::Header, "Calm", &mut id);
     assert!(header.layers.iter().all(|l| l.x >= 3840. * inset_x - 1.));
+}
+
+#[test]
+fn accents_and_soft_shapes_reach_the_export() {
+    let mut slide = starter();
+    if let LayerKind::Text { text, accent, .. } = &mut slide.layers[0].kind {
+        *text = "Sleep *better* tonight".into();
+        *accent = Some("#fde047".into());
+    }
+    let mut glow = Layer::shape(Target::Iphone, 99);
+    if let LayerKind::Shape { soft, fill_opacity, stroke, stroke_width, .. } = &mut glow.kind {
+        *soft = 120.;
+        *fill_opacity = 0.5;
+        *stroke = Some("#ffffff".into());
+        *stroke_width = 8.;
+    }
+    slide.layers.push(glow);
+    let svg = to_svg(std::slice::from_ref(&slide), 0, CanvasSize::Iphone69);
+    assert!(svg.contains(r##"fill="#fde047" fill-opacity="1">better"##));
+    assert!(!svg.contains('*'));
+    assert!(svg.contains("feGaussianBlur") && svg.contains(r#"stroke-width="8""#));
+    render_png(std::slice::from_ref(&slide), 0, CanvasSize::Iphone69, &std::env::temp_dir(), 0.1).unwrap();
 }

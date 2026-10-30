@@ -8,7 +8,9 @@
 //! change appears there as it lands and can be undone.
 
 pub mod clients;
+mod creative;
 mod design;
+mod simulator;
 
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
@@ -25,7 +27,10 @@ from top and bottom) and the search result art (3:2, 3840 x 2560). A design is a
 background plus layers (text, device, image, shape) positioned in canvas pixels from the top-left. Device \
 layers can be any iPhone or iPad from iPhone X to iPhone 18 Pro Max and the iPhone Duo. Screenshot slides \
 sit edge to edge, so a layer whose x runs past the canvas width continues onto the next slide, which makes \
-panoramas; header and search slides are alternative versions. Any design can also be a video \
+panoramas; header and search slides are alternative versions. For a video, the quickest good start is \
+create_video: a storyboard of scenes in one call, in one of the themes; then look at it with \
+render_storyboard, check it with review_video, and refine with set_camera, add_callout and the layer \
+tools. Any design can also be a video \
 (set_video): slides become scenes, layers enter, leave and drift (the motion properties), device screens can \
 play screen recordings, render_frame shows any moment and export_video writes the MP4. To show the app in \
 motion, build it, run it in the iOS Simulator and record it with `xcrun simctl io booted recordVideo --codec \

@@ -204,6 +204,60 @@ pub fn vertical_metrics(style: Style) -> (f32, f32) {
     with_face(style, std::iter::empty(), |face| face.metrics)
 }
 
+/// A word of a text layer, for drawing it in its own colour or revealing
+/// words one by one.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Word {
+    pub text: String,
+    /// Marked `*like this*` in the text: drawn in the layer's accent colour.
+    pub accent: bool,
+    /// Its place in the whole text, counting from 0.
+    pub index: usize,
+}
+
+/// The text without its `*accent*` marks, as it is measured and drawn.
+pub fn strip_marks(text: &str) -> String {
+    text.replace('*', "")
+}
+
+/// `lines` (as wrapped from the unmarked text) split back into words, each
+/// knowing whether `marked` set it in the accent colour. Wrapping keeps the
+/// words in order, so they line up one for one.
+pub fn words_by_line(marked: &str, lines: &[String]) -> Vec<Vec<Word>> {
+    let mut accent = false;
+    let mut tokens = marked.split_whitespace().map(|token| {
+        let starts = token.starts_with('*');
+        if starts {
+            accent = true;
+        }
+        let word = Word {
+            text: token.replace('*', ""),
+            accent,
+            index: 0,
+        };
+        // A closing mark ends the run: "*better*", or "*two words*".
+        if token.ends_with('*') && (!starts || token.matches('*').count() >= 2) {
+            accent = false;
+        }
+        word
+    });
+    let mut index = 0;
+    lines
+        .iter()
+        .map(|line| {
+            (0..line.split_whitespace().count())
+                .filter_map(|_| tokens.next())
+                .filter(|word| !word.text.is_empty())
+                .map(|mut word| {
+                    word.index = index;
+                    index += 1;
+                    word
+                })
+                .collect()
+        })
+        .collect()
+}
+
 /// Greedy word wrap with the font's real widths. Explicit newlines always
 /// break; a word too long for a line gets a line of its own.
 pub fn wrap_styled(text: &str, style: Style, font_size: f32, max_width: f32) -> Vec<String> {

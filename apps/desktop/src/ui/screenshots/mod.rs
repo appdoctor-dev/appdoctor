@@ -800,7 +800,7 @@ impl ScreenshotsView {
                     set(&self.inputs.color, color.clone(), window, cx);
                     set_slider(&self.sliders.size, *size, window, cx);
                 }
-                LayerKind::Shape { fill, radius } => {
+                LayerKind::Shape { fill, radius, .. } => {
                     set(&self.inputs.color, fill.clone(), window, cx);
                     set_slider(&self.sliders.radius, *radius, window, cx);
                 }

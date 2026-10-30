@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Layer, LayerKind, Slide};
+use crate::{Background, Layer, LayerKind, Slide};
 
 /// How long a slide shows when it has no length of its own, in seconds.
 pub const DEFAULT_SCENE: f32 = 3.;
@@ -93,16 +93,20 @@ pub enum Effect {
     Zoom,
     /// Springs in from small with a slight overshoot.
     Pop,
+    /// Text appears word by word over the effect's length (other layers
+    /// fade).
+    Words,
 }
 
 impl Effect {
-    pub const ALL: [Effect; 6] = [
+    pub const ALL: [Effect; 7] = [
         Effect::None,
         Effect::Fade,
         Effect::Rise,
         Effect::Slide,
         Effect::Zoom,
         Effect::Pop,
+        Effect::Words,
     ];
 
     pub fn label(self) -> &'static str {
@@ -113,6 +117,7 @@ impl Effect {
             Effect::Slide => "Slide",
             Effect::Zoom => "Zoom",
             Effect::Pop => "Pop",
+            Effect::Words => "Words",
         }
     }
 
@@ -124,6 +129,7 @@ impl Effect {
             Effect::Slide => "slide",
             Effect::Zoom => "zoom",
             Effect::Pop => "pop",
+            Effect::Words => "words",
         }
     }
 
@@ -185,6 +191,83 @@ impl Drift {
     pub fn from_slug(slug: &str) -> Option<Drift> {
         Drift::ALL.into_iter().find(|d| d.slug() == slug)
     }
+}
+
+/// A camera move: the scene zooms in on a point, holds, and zooms back out.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Focus {
+    /// Seconds into the scene that the move starts.
+    pub at: f32,
+    /// The point to zoom in on, in canvas pixels.
+    pub x: f32,
+    pub y: f32,
+    /// How far in: 2 shows half the width.
+    pub zoom: f32,
+    /// Seconds held at the point before zooming back out.
+    #[serde(default = "one_second")]
+    pub hold: f32,
+    /// Seconds each move (in, and back out) takes.
+    #[serde(default = "move_time")]
+    pub length: f32,
+}
+
+fn one_second() -> f32 {
+    1.
+}
+
+fn move_time() -> f32 {
+    0.7
+}
+
+/// Where the camera looks `time` seconds into the scene: the canvas point
+/// at the centre of the frame, and the zoom. Kept inside the canvas.
+pub fn camera(slide: &Slide, time: f32, canvas: (f32, f32)) -> (f32, f32, f32) {
+    let centre = (canvas.0 / 2., canvas.1 / 2.);
+    let Some((focus, e)) = slide.camera.iter().find_map(|focus| {
+        let length = focus.length.max(0.05);
+        let t = time - focus.at;
+        let end = length * 2. + focus.hold.max(0.);
+        (0. ..end).contains(&t).then(|| {
+            let e = if t < length {
+                ease_in_out(t / length)
+            } else if t < length + focus.hold {
+                1.
+            } else {
+                1. - ease_in_out((t - length - focus.hold) / length)
+            };
+            (focus, e)
+        })
+    }) else {
+        return (centre.0, centre.1, 1.);
+    };
+    let zoom = 1. + (focus.zoom.max(1.) - 1.) * e;
+    let (half_w, half_h) = (canvas.0 / 2. / zoom, canvas.1 / 2. / zoom);
+    let x = (centre.0 + (focus.x - centre.0) * e).clamp(half_w, canvas.0 - half_w);
+    let y = (centre.1 + (focus.y - centre.1) * e).clamp(half_h, canvas.1 - half_h);
+    (x, y, zoom)
+}
+
+/// The slide's background `time` seconds in: a gradient turns by its spin.
+pub fn background_at(slide: &Slide, time: f32) -> Background {
+    match &slide.background {
+        Background::Gradient { from, to, angle } if slide.spin != 0. => Background::Gradient {
+            from: from.clone(),
+            to: to.clone(),
+            angle: (angle + slide.spin * time).rem_euclid(360.),
+        },
+        background => background.clone(),
+    }
+}
+
+/// A layer as it shows at a moment.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Shown {
+    pub layer: Layer,
+    /// How far into a device's screen recording, in seconds.
+    pub clip: f32,
+    /// For the Words effect: how many words show (the next one partly).
+    /// `None` shows them all.
+    pub words: Option<f32>,
 }
 
 /// A layer's timing within its scene.
@@ -304,14 +387,15 @@ fn pull(effect: Effect, amount: f32, entering: bool, canvas: (f32, f32)) -> (f32
         Effect::Slide => (width * 0.35 * amount * if entering { 1. } else { -1. }, 0., 1., 1. - amount),
         Effect::Zoom => (0., 0., 1. - 0.15 * amount, 1. - amount),
         Effect::Pop => (0., 0., 1. - 0.6 * amount, (1. - amount * 1.5).clamp(0., 1.)),
+        // Text reveals its words instead; anything else fades.
+        Effect::Words => (0., 0., 1., 1. - amount),
     }
 }
 
 /// `layer` as it looks `time` seconds into a scene `scene` seconds long on
 /// a `canvas` (width, height): moved, scaled about its centre and faded.
-/// `None` while it isn't on screen. The second value is how far into its
-/// clip a device's screen recording is.
-pub fn animate(layer: &Layer, time: f32, scene: f32, canvas: (f32, f32)) -> Option<(Layer, f32)> {
+/// `None` while it isn't on screen.
+pub fn animate(layer: &Layer, time: f32, scene: f32, canvas: (f32, f32)) -> Option<Shown> {
     let m = &layer.motion;
     let length = m.length.max(0.01);
     if time < m.start {
@@ -330,7 +414,12 @@ pub fn animate(layer: &Layer, time: f32, scene: f32, canvas: (f32, f32)) -> Opti
         scale *= s;
         opacity *= o;
     };
-    if m.enter != Effect::None {
+    let text = matches!(layer.kind, LayerKind::Text { .. });
+    let mut words = None;
+    if m.enter == Effect::Words && text {
+        let count = layer.words().iter().map(Vec::len).sum::<usize>() as f32;
+        words = Some(((time - m.start) / length).clamp(0., 1.) * count);
+    } else if m.enter != Effect::None {
         let p = ((time - m.start) / length).clamp(0., 1.);
         let eased = if m.enter == Effect::Pop { ease_back(p) } else { ease_out(p) };
         apply(pull(m.enter, 1. - eased, true, canvas));
@@ -361,14 +450,43 @@ pub fn animate(layer: &Layer, time: f32, scene: f32, canvas: (f32, f32)) -> Opti
     let mut clip_time = 0.;
     match &mut moved.kind {
         LayerKind::Text { size, .. } => *size *= scale,
-        LayerKind::Device { clip_start, .. } => clip_time = *clip_start + (time - m.start).max(0.),
+        LayerKind::Device {
+            clip_start, clip_speed, ..
+        } => clip_time = *clip_start + (time - m.start).max(0.) * clip_speed.max(0.05),
         _ => {}
     }
-    Some((moved, clip_time))
+    Some(Shown {
+        layer: moved,
+        clip: clip_time,
+        words,
+    })
+}
+
+/// Moves a layer through the camera: the point (x, y) at the centre of
+/// the frame, zoomed by `zoom`.
+fn through_camera(layer: &mut Layer, (x, y, zoom): (f32, f32, f32), canvas: (f32, f32)) {
+    if zoom == 1. && x == canvas.0 / 2. && y == canvas.1 / 2. {
+        return;
+    }
+    layer.x = canvas.0 / 2. + (layer.x - x) * zoom;
+    layer.y = canvas.1 / 2. + (layer.y - y) * zoom;
+    layer.width *= zoom;
+    layer.height *= zoom;
+    if let LayerKind::Text { size, .. } = &mut layer.kind {
+        *size *= zoom;
+    }
+    if let LayerKind::Shape { soft, stroke_width, radius, .. } = &mut layer.kind {
+        *soft *= zoom;
+        *stroke_width *= zoom;
+        *radius *= zoom;
+    }
+    if let LayerKind::Image { radius, .. } = &mut layer.kind {
+        *radius *= zoom;
+    }
 }
 
 /// The layers scene `index` shows `time` seconds in, as [`animate`] has
-/// them, with each one's owning slide and clip time. Screenshot scenes
+/// them and the scene's camera frames them, with each one's owning slide. Screenshot scenes
 /// include the parts of neighbours' layers spanning in, at the owner's own
 /// time (finished for earlier scenes, not started for later ones). Layers
 /// owned by `skip` are left out: during a push both scenes are drawn and
@@ -380,7 +498,8 @@ pub fn scene_layers(
     canvas: (f32, f32),
     spans: bool,
     skip: Option<usize>,
-) -> Vec<(usize, Layer, f32)> {
+) -> Vec<(usize, Shown)> {
+    let view = slides.get(index).map_or((canvas.0 / 2., canvas.1 / 2., 1.), |slide| camera(slide, time, canvas));
     let visible: Vec<(usize, Layer)> = if spans {
         crate::visible_layers(slides, index, canvas.0)
     } else {
@@ -399,7 +518,10 @@ pub fn scene_layers(
                 std::cmp::Ordering::Equal => time,
                 std::cmp::Ordering::Greater => 0.,
             };
-            animate(&layer, at, scene, canvas).map(|(moved, clip)| (owner, moved, clip))
+            animate(&layer, at, scene, canvas).map(|mut shown| {
+                through_camera(&mut shown.layer, view, canvas);
+                (owner, shown)
+            })
         })
         .collect()
 }
@@ -456,11 +578,11 @@ mod tests {
         };
         let canvas = Target::Iphone.canvas();
         assert!(animate(&layer, 0.5, 3., canvas).is_none(), "not in yet");
-        let (entering, _) = animate(&layer, 1.1, 3., canvas).unwrap();
+        let entering = animate(&layer, 1.1, 3., canvas).unwrap().layer;
         assert!(entering.y > layer.y && entering.opacity < 1.);
-        let (settled, _) = animate(&layer, 1.8, 3., canvas).unwrap();
+        let settled = animate(&layer, 1.8, 3., canvas).unwrap().layer;
         assert!((settled.y - layer.y).abs() < 0.01 && (settled.opacity - 1.).abs() < 1e-4);
-        let (leaving, _) = animate(&layer, 2.25, 3., canvas).unwrap();
+        let leaving = animate(&layer, 2.25, 3., canvas).unwrap().layer;
         assert!(leaving.opacity < 1. && leaving.opacity > 0.);
         assert!(animate(&layer, 2.6, 3., canvas).is_none(), "gone");
 
@@ -468,8 +590,8 @@ mod tests {
             drift: Drift::ZoomIn,
             ..Motion::default()
         };
-        let (start, _) = animate(&layer, 0., 3., canvas).unwrap();
-        let (end, _) = animate(&layer, 3., 3., canvas).unwrap();
+        let start = animate(&layer, 0., 3., canvas).unwrap().layer;
+        let end = animate(&layer, 3., 3., canvas).unwrap().layer;
         assert!(end.width > start.width);
         assert!(((end.x + end.width / 2.) - (layer.x + layer.width / 2.)).abs() < 0.01, "zooms about its centre");
     }
@@ -477,12 +599,57 @@ mod tests {
     #[test]
     fn screen_recordings_play_from_the_layers_start() {
         let mut device = Layer::device(Target::Iphone, 1, 0.);
-        if let LayerKind::Device { clip_start, .. } = &mut device.kind {
+        if let LayerKind::Device {
+            clip_start, clip_speed, ..
+        } = &mut device.kind
+        {
             *clip_start = 2.;
+            *clip_speed = 2.;
         }
         device.motion.start = 0.5;
-        let (_, clip) = animate(&device, 1.5, 3., Target::Iphone.canvas()).unwrap();
-        assert!((clip - 3.).abs() < 1e-4);
+        let clip = animate(&device, 1.5, 3., Target::Iphone.canvas()).unwrap().clip;
+        assert!((clip - 4.).abs() < 1e-4, "{clip}");
+    }
+
+    #[test]
+    fn words_come_in_one_by_one() {
+        let mut layer = Layer::text(Target::Iphone, 1, "Sleep *better* tonight", 0., 100., 700, "#fff");
+        layer.motion.enter = Effect::Words;
+        layer.motion.length = 1.5;
+        let canvas = Target::Iphone.canvas();
+        let at = |t: f32| animate(&layer, t, 3., canvas).unwrap().words.unwrap();
+        assert_eq!(at(0.), 0.);
+        assert!((at(0.75) - 1.5).abs() < 1e-4);
+        assert_eq!(at(2.), 3.);
+        let words: Vec<_> = layer.words().concat();
+        assert_eq!(words.iter().map(|w| w.text.as_str()).collect::<Vec<_>>(), ["Sleep", "better", "tonight"]);
+        assert_eq!(words.iter().map(|w| w.accent).collect::<Vec<_>>(), [false, true, false]);
+        assert_eq!(layer.lines().concat(), "Sleep better tonight");
+    }
+
+    #[test]
+    fn the_camera_zooms_in_holds_and_returns() {
+        let canvas = Target::Iphone.canvas();
+        let mut id = 0;
+        let mut slide = Slide::starter(Target::Iphone, "Zoom", &mut id);
+        slide.camera.push(Focus {
+            at: 1.,
+            x: 660.,
+            y: 2000.,
+            zoom: 2.,
+            hold: 1.,
+            length: 0.5,
+        });
+        assert_eq!(camera(&slide, 0.5, canvas), (660., 1434., 1.));
+        let (x, y, zoom) = camera(&slide, 2., canvas);
+        assert_eq!((x, y, zoom), (660., 2000., 2.));
+        assert_eq!(camera(&slide, 3.5, canvas).2, 1.);
+        // Layers move through it: the focus point lands mid-frame.
+        let shown = scene_layers(std::slice::from_ref(&slide), 0, 2., canvas, true, None);
+        let device = &shown[2].1.layer;
+        assert!(device.width > slide.layers[2].width * 1.9);
+        slide.spin = 90.;
+        assert!(matches!(background_at(&slide, 1.), Background::Gradient { angle, .. } if angle == 250.));
     }
 
     #[test]

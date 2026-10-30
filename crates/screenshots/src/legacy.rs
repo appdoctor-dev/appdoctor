@@ -82,11 +82,14 @@ pub(crate) fn parse(bytes: &[u8]) -> Option<Design> {
                 screenshot: slide.device.screenshot,
                 shadow: true,
                 clip_start: 0.,
+                clip_speed: 1.,
             };
             Slide {
                 background: slide.background,
                 layers: vec![headline, subheadline, device],
                 duration: crate::motion::DEFAULT_SCENE,
+                spin: 0.,
+                camera: Vec::new(),
             }
         })
         .collect();

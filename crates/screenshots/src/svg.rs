@@ -85,8 +85,9 @@ impl Pieces {
 
     /// A layer, faded by `opacity` on top of its own. A device playing a
     /// recording is split around the recording's frame when `clips`;
-    /// otherwise its screen is left dark.
-    pub(crate) fn layer(&mut self, layer: &Layer, clip_time: f32, opacity: f32, clips: bool) {
+    /// otherwise its screen is left dark. `words` limits how many words of
+    /// a text show (see [`crate::motion::Shown`]).
+    pub(crate) fn layer(&mut self, layer: &Layer, clip_time: f32, words: Option<f32>, opacity: f32, clips: bool) {
         let opacity = (layer.opacity * opacity).clamp(0., 1.);
         let recording = match &layer.kind {
             LayerKind::Device {
@@ -99,7 +100,7 @@ impl Pieces {
         };
         match recording {
             Some((file, geometry)) => {
-                self.markup(layer, Part::Base, opacity);
+                self.markup(layer, Part::Base, opacity, words);
                 self.flush();
                 self.done.push(Piece::Clip {
                     file,
@@ -108,16 +109,16 @@ impl Pieces {
                     radius: geometry.screen_radius,
                     opacity,
                 });
-                self.markup(layer, Part::Overlay, opacity);
+                self.markup(layer, Part::Overlay, opacity, words);
             }
-            None => self.markup(layer, Part::All, opacity),
+            None => self.markup(layer, Part::All, opacity, words),
         }
     }
 
-    fn markup(&mut self, layer: &Layer, part: Part, opacity: f32) {
+    fn markup(&mut self, layer: &Layer, part: Part, opacity: f32, words: Option<f32>) {
         let id = self.id();
         self.body.push_str(&format!(r#"<g opacity="{opacity}">"#));
-        layer_svg(layer, id, part, &mut self.defs, &mut self.body);
+        layer_svg(layer, id, part, words, &mut self.defs, &mut self.body);
         self.body.push_str("</g>");
     }
 
@@ -161,7 +162,7 @@ pub fn to_svg(slides: &[Slide], index: usize, size: CanvasSize) -> String {
     );
     pieces.background(&background, 0., canvas, 1.);
     for (_, layer) in still_layers(slides, index, size) {
-        pieces.layer(&layer, 0., 1., false);
+        pieces.layer(&layer, 0., None, 1., false);
     }
     let (defs, body) = (pieces.defs, pieces.body);
     document(&defs, &body, size)
@@ -180,7 +181,7 @@ pub(crate) fn still_layers(slides: &[Slide], index: usize, size: CanvasSize) -> 
     }
 }
 
-fn layer_svg(layer: &Layer, index: usize, part: Part, defs: &mut String, body: &mut String) {
+fn layer_svg(layer: &Layer, index: usize, part: Part, words: Option<f32>, defs: &mut String, body: &mut String) {
     let (x, y, width, height) = (layer.x, layer.y, layer.width, layer.height);
     match &layer.kind {
         LayerKind::Text {
@@ -190,6 +191,7 @@ fn layer_svg(layer: &Layer, index: usize, part: Part, defs: &mut String, body: &
             align,
             font,
             italic,
+            accent,
             ..
         } => {
             let (anchor, tx) = match align {
@@ -206,12 +208,27 @@ fn layer_svg(layer: &Layer, index: usize, part: Part, defs: &mut String, body: &
             // centred in each line box.
             let (ascent, descent) = layer.text_style().map(vertical_metrics).unwrap_or((0.8, 0.2));
             let line = size * LINE_HEIGHT;
-            for (i, text) in layer.lines().iter().enumerate() {
+            let accent = accent.as_deref().unwrap_or(color.as_str());
+            for (i, line_words) in layer.words().iter().enumerate() {
                 let baseline = y + i as f32 * line + (line - (ascent + descent) * size) / 2. + ascent * size;
+                // Each word in its colour; words still to come are kept in
+                // place but hidden, so the line doesn't shift as they arrive.
+                let last = line_words.len().saturating_sub(1);
+                let spans: String = line_words
+                    .iter()
+                    .enumerate()
+                    .map(|(n, word)| {
+                        let shown = words.map_or(1., |count| (count - word.index as f32).clamp(0., 1.));
+                        format!(
+                            r#"<tspan fill="{}" fill-opacity="{shown}">{}{}</tspan>"#,
+                            color_attr(if word.accent { accent } else { color }),
+                            escape(&word.text),
+                            if n < last { " " } else { "" }
+                        )
+                    })
+                    .collect();
                 body.push_str(&format!(
-                    r#"<text x="{tx}" y="{baseline}" font-family="{family}'{DEFAULT_FONT}', {FALLBACK_FAMILIES}" font-size="{size}" font-weight="{weight}"{style} fill="{}" text-anchor="{anchor}">{}</text>"#,
-                    color_attr(color),
-                    escape(text)
+                    r#"<text x="{tx}" y="{baseline}" font-family="{family}'{DEFAULT_FONT}', {FALLBACK_FAMILIES}" font-size="{size}" font-weight="{weight}"{style} text-anchor="{anchor}" xml:space="preserve">{spans}</text>"#
                 ));
             }
         }
@@ -314,10 +331,37 @@ fn layer_svg(layer: &Layer, index: usize, part: Part, defs: &mut String, body: &
                 ));
             }
         }
-        LayerKind::Shape { fill, radius } => body.push_str(&format!(
-            r#"<rect x="{x}" y="{y}" width="{width}" height="{height}" rx="{radius}" fill="{}"/>"#,
-            color_attr(fill)
-        )),
+        LayerKind::Shape {
+            fill,
+            radius,
+            fill_opacity,
+            stroke,
+            stroke_width,
+            soft,
+        } => {
+            let radius = radius.min(width.min(height) / 2.);
+            let filter = if *soft > 0. {
+                defs.push_str(&format!(
+                    r#"<filter id="soft{index}" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="{}"/></filter>"#,
+                    soft / 2.
+                ));
+                format!(r#" filter="url(#soft{index})""#)
+            } else {
+                String::new()
+            };
+            let outline = match stroke {
+                Some(stroke) if *stroke_width > 0. => format!(
+                    r#" stroke="{}" stroke-width="{stroke_width}""#,
+                    color_attr(stroke)
+                ),
+                _ => String::new(),
+            };
+            body.push_str(&format!(
+                r#"<rect x="{x}" y="{y}" width="{width}" height="{height}" rx="{radius}" fill="{}" fill-opacity="{}"{outline}{filter}/>"#,
+                color_attr(fill),
+                fill_opacity.clamp(0., 1.)
+            ));
+        }
     }
 }
 

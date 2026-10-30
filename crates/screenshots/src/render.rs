@@ -69,7 +69,7 @@ pub fn render_slide(
             LayerKind::Device { clip_start, .. } => *clip_start,
             _ => 0.,
         };
-        pieces.layer(&layer, start, 1., true);
+        pieces.layer(&layer, start, None, 1., true);
     }
     rasterize(pieces.finish(), size, images_dir, scale, clips)
 }
@@ -93,10 +93,10 @@ pub fn render_frame(
         let Some(slide) = slides.get(index) else {
             return;
         };
-        pieces.background(&slide.background, offset, canvas, opacity);
-        for (_, mut layer, clip) in scene_layers(slides, index, time, canvas, spans, skip) {
-            layer.x += offset;
-            pieces.layer(&layer, clip, opacity, true);
+        pieces.background(&crate::motion::background_at(slide, time), offset, canvas, opacity);
+        for (_, mut shown) in scene_layers(slides, index, time, canvas, spans, skip) {
+            shown.layer.x += offset;
+            pieces.layer(&shown.layer, shown.clip, shown.words, opacity, true);
         }
     };
     match at.next {

@@ -433,7 +433,7 @@ impl ScreenshotsView {
                         .child(row("Shadow", shadow_switch(*shadow, cx), cx)),
                 )
                 .into_any_element(),
-            LayerKind::Shape { radius, fill } => v_flex()
+            LayerKind::Shape { radius, fill, .. } => v_flex()
                 .child(heading("Shape", cx))
                 .child(
                     group(cx)

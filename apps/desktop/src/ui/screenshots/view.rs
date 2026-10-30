@@ -86,8 +86,9 @@ fn drop_shadow(s: f32) -> Vec<BoxShadow> {
 }
 
 /// A layer's look at scale `s`, positioned inside its own box. `clip` is
-/// the current frame of a device's screen recording.
-fn layer_visual(layer: &Layer, s: f32, folder: &Path, clip: Option<Arc<Image>>) -> AnyElement {
+/// the current frame of a device's screen recording; `words`, how many
+/// words of a text show (see `motion::Shown`).
+fn layer_visual(layer: &Layer, s: f32, folder: &Path, clip: Option<Arc<Image>>, words: Option<f32>) -> AnyElement {
     let (w, h) = (layer.width * s, layer.height * s);
     match &layer.kind {
         LayerKind::Text {
@@ -97,9 +98,11 @@ fn layer_visual(layer: &Layer, s: f32, folder: &Path, clip: Option<Arc<Image>>) 
             align,
             font,
             italic,
+            accent,
             ..
         } => {
             let family = SharedString::from(font.clone().unwrap_or_else(|| DEFAULT_FONT.to_owned()));
+            let (base, accent) = (color(c), color(accent.as_deref().unwrap_or(c)));
             v_flex()
                 .w(px(w))
                 .map(|this| match align {
@@ -107,7 +110,30 @@ fn layer_visual(layer: &Layer, s: f32, folder: &Path, clip: Option<Arc<Image>>) 
                     Align::Center => this.items_center(),
                     Align::Right => this.items_end(),
                 })
-                .children(layer.lines().into_iter().map(|line| {
+                .children(layer.words().into_iter().map(|line_words| {
+                    // Each word in its colour; words still to come stay in
+                    // place, invisible, so the line doesn't shift.
+                    let mut line = String::new();
+                    let mut highlights = Vec::new();
+                    for word in &line_words {
+                        if !line.is_empty() {
+                            line.push(' ');
+                        }
+                        let start = line.len();
+                        line.push_str(&word.text);
+                        let shown = words.map_or(1., |count| (count - word.index as f32).clamp(0., 1.));
+                        let tint = if word.accent { accent } else { base };
+                        highlights.push((
+                            start..line.len(),
+                            HighlightStyle {
+                                color: Some(tint.opacity(shown)),
+                                ..Default::default()
+                            },
+                        ));
+                    }
+                    if line.is_empty() {
+                        line.push(' ');
+                    }
                     div()
                         .whitespace_nowrap()
                         .font_family(family.clone())
@@ -115,8 +141,8 @@ fn layer_visual(layer: &Layer, s: f32, folder: &Path, clip: Option<Arc<Image>>) 
                         .text_size(px(size * s))
                         .line_height(px(size * s * LINE_HEIGHT))
                         .font_weight(FontWeight(*weight as f32))
-                        .text_color(color(c))
-                        .child(if line.is_empty() { " ".to_owned() } else { line })
+                        .text_color(base)
+                        .child(StyledText::new(line).with_highlights(highlights))
                 }))
                 .into_any_element()
         }
@@ -219,12 +245,39 @@ fn layer_visual(layer: &Layer, s: f32, folder: &Path, clip: Option<Arc<Image>>) 
                 )
             })
             .into_any_element(),
-        LayerKind::Shape { fill, radius } => div()
-            .w(px(w))
-            .h(px(h))
-            .rounded(px(radius.min(layer.width.min(layer.height) / 2.) * s))
-            .bg(color(fill))
-            .into_any_element(),
+        LayerKind::Shape {
+            fill,
+            radius,
+            fill_opacity,
+            stroke,
+            stroke_width,
+            soft,
+        } => {
+            let tint = color(fill).opacity(fill_opacity.clamp(0., 1.));
+            let rounded = radius.min(layer.width.min(layer.height) / 2.) * s;
+            div()
+                .w(px(w))
+                .h(px(h))
+                .rounded(px(rounded))
+                .map(|this| {
+                    if *soft > 0. {
+                        // A glow: only the blurred shadow of the shape shows.
+                        this.shadow(vec![BoxShadow {
+                            color: tint,
+                            offset: point(px(0.), px(0.)),
+                            blur_radius: px(soft * s),
+                            spread_radius: px(-soft * s * 0.25),
+                            inset: false,
+                        }])
+                    } else {
+                        this.bg(tint)
+                    }
+                })
+                .when_some(stroke.clone().filter(|_| *stroke_width > 0.), |this, stroke| {
+                    this.border(px((stroke_width * s).max(0.5))).border_color(color(&stroke))
+                })
+                .into_any_element()
+        }
     }
 }
 
@@ -262,7 +315,7 @@ impl ScreenshotsView {
             .map(|(owner, layer)| {
                 let (owner, id, locked) = (*owner, layer.id, layer.locked);
                 let element = self
-                    .positioned(layer, s, folder, None)
+                    .positioned(layer, s, folder, None, None)
                     .id(SharedString::from(format!("layer-{index}-{owner}-{id}")));
                 if active && owner == index {
                     element
@@ -443,7 +496,7 @@ impl ScreenshotsView {
     /// A layer drawn in an absolutely positioned box at scale `s`.
     /// A layer placed on its slide. A device playing a recording shows the
     /// frame at `clip_time`, or at its start when that's `None`.
-    fn positioned(&self, layer: &Layer, s: f32, folder: &Path, clip_time: Option<f32>) -> Div {
+    fn positioned(&self, layer: &Layer, s: f32, folder: &Path, clip_time: Option<f32>, words: Option<f32>) -> Div {
         let clip = match &layer.kind {
             LayerKind::Device {
                 screenshot: Some(file),
@@ -459,7 +512,7 @@ impl ScreenshotsView {
             .w(px(layer.width * s))
             .h(px(layer.height * s))
             .opacity(layer.opacity.clamp(0., 1.))
-            .child(layer_visual(layer, s, folder, clip))
+            .child(layer_visual(layer, s, folder, clip, words))
     }
 
     fn selection_box(&self, layer: &Layer, s: f32, cx: &mut Context<Self>) -> AnyElement {
@@ -642,15 +695,18 @@ impl ScreenshotsView {
                 .left(px(offset * s))
                 .w(px(canvas.0 * s))
                 .h(px(canvas.1 * s))
-                .bg(background_fill(&slide.background))
+                .bg(background_fill(&motion::background_at(slide, time)))
                 .opacity(opacity)
                 .into_any_element(),
         );
         let layers = motion::scene_layers(&self.design.slides, index, time, canvas, self.target.is_screenshot(), skip);
-        for (_, mut layer, clip) in layers {
-            layer.x += offset;
-            layer.opacity *= opacity;
-            parts.push(self.positioned(&layer, s, folder, Some(clip)).into_any_element());
+        for (_, mut shown) in layers {
+            shown.layer.x += offset;
+            shown.layer.opacity *= opacity;
+            parts.push(
+                self.positioned(&shown.layer, s, folder, Some(shown.clip), shown.words)
+                    .into_any_element(),
+            );
         }
     }
 

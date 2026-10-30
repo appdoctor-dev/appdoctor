@@ -13,10 +13,10 @@ use appdoctor_store::Store;
 use base64::Engine as _;
 use serde_json::{Value, json};
 
-type Result<T> = std::result::Result<T, String>;
+pub(crate) type Result<T> = std::result::Result<T, String>;
 
 /// Arguments every design tool takes.
-fn design_args() -> Value {
+pub(crate) fn design_args() -> Value {
     json!({
         "app_id": { "type": "integer", "description": "The app's App Store ID, from list_apps." },
         "device": {
@@ -62,14 +62,14 @@ fn layer_properties() -> Value {
     })
 }
 
-fn with(mut base: Value, extra: Value) -> Value {
+pub(crate) fn with(mut base: Value, extra: Value) -> Value {
     if let (Some(base), Some(extra)) = (base.as_object_mut(), extra.as_object()) {
         base.extend(extra.clone());
     }
     base
 }
 
-fn tool(name: &str, title: &str, description: &str, properties: Value, required: &[&str], read_only: bool) -> Value {
+pub(crate) fn tool(name: &str, title: &str, description: &str, properties: Value, required: &[&str], read_only: bool) -> Value {
     json!({
         "name": name,
         "title": title,
@@ -80,6 +80,13 @@ fn tool(name: &str, title: &str, description: &str, properties: Value, required:
 }
 
 pub fn tools() -> Vec<Value> {
+    let mut tools = design_tools();
+    tools.extend(crate::creative::tools());
+    tools.extend(crate::simulator::tools());
+    tools
+}
+
+fn design_tools() -> Vec<Value> {
     let slide = json!({ "slide": { "type": "integer", "minimum": 0, "description": "The slide's index, from 0." } });
     let layer_id = json!({ "layer_id": { "type": "integer", "description": "The layer's id, from get_design." } });
     vec![
@@ -305,6 +312,12 @@ pub fn tools() -> Vec<Value> {
 
 pub fn call(data_dir: &Path, name: &str, args: &Value) -> Result<Vec<Value>> {
     let args = Args(args);
+    if let Some(result) = crate::creative::call(data_dir, name, &args) {
+        return result;
+    }
+    if let Some(result) = crate::simulator::call(data_dir, name, &args) {
+        return result;
+    }
     match name {
         "list_apps" => list_apps(data_dir),
         "design_options" => Ok(text(design_options())),
@@ -339,7 +352,7 @@ pub fn call(data_dir: &Path, name: &str, args: &Value) -> Result<Vec<Value>> {
     }
 }
 
-fn text(value: Value) -> Vec<Value> {
+pub(crate) fn text(value: Value) -> Vec<Value> {
     let text = match value {
         Value::String(text) => text,
         value => serde_json::to_string_pretty(&value).unwrap_or_default(),
@@ -347,18 +360,18 @@ fn text(value: Value) -> Vec<Value> {
     vec![json!({ "type": "text", "text": text })]
 }
 
-struct Args<'a>(&'a Value);
+pub(crate) struct Args<'a>(pub(crate) &'a Value);
 
 impl Args<'_> {
-    fn get(&self, key: &str) -> Option<&Value> {
+    pub(crate) fn get(&self, key: &str) -> Option<&Value> {
         self.0.get(key).filter(|value| !value.is_null())
     }
 
-    fn opt_str(&self, key: &str) -> Option<&str> {
+    pub(crate) fn opt_str(&self, key: &str) -> Option<&str> {
         self.get(key).and_then(Value::as_str)
     }
 
-    fn opt_f32(&self, key: &str) -> Result<Option<f32>> {
+    pub(crate) fn opt_f32(&self, key: &str) -> Result<Option<f32>> {
         match self.get(key) {
             None => Ok(None),
             Some(value) => value
@@ -368,7 +381,7 @@ impl Args<'_> {
         }
     }
 
-    fn opt_bool(&self, key: &str) -> Result<Option<bool>> {
+    pub(crate) fn opt_bool(&self, key: &str) -> Result<Option<bool>> {
         match self.get(key) {
             None => Ok(None),
             Some(value) => value
@@ -379,7 +392,7 @@ impl Args<'_> {
     }
 
     /// A whole number, accepting one sent as a string ("6762288498").
-    fn opt_u64(&self, key: &str) -> Result<Option<u64>> {
+    pub(crate) fn opt_u64(&self, key: &str) -> Result<Option<u64>> {
         match self.get(key) {
             None => Ok(None),
             Some(Value::String(text)) => text
@@ -394,15 +407,15 @@ impl Args<'_> {
         }
     }
 
-    fn u64(&self, key: &str) -> Result<u64> {
+    pub(crate) fn u64(&self, key: &str) -> Result<u64> {
         self.opt_u64(key)?.ok_or_else(|| format!("{key} is required"))
     }
 
-    fn index(&self, key: &str) -> Result<usize> {
+    pub(crate) fn index(&self, key: &str) -> Result<usize> {
         Ok(self.u64(key)? as usize)
     }
 
-    fn color(&self, key: &str) -> Result<Option<String>> {
+    pub(crate) fn color(&self, key: &str) -> Result<Option<String>> {
         match self.opt_str(key) {
             None => Ok(None),
             Some(color) if parse_color(color).is_some() => Ok(Some(color.trim().to_owned())),
@@ -486,15 +499,15 @@ fn list_fonts(query: Option<&str>) -> Value {
 }
 
 /// One app's design for one device, read from disk.
-struct Doc {
-    app_id: u64,
-    folder: PathBuf,
-    target: Target,
-    design: Design,
+pub(crate) struct Doc {
+    pub(crate) app_id: u64,
+    pub(crate) folder: PathBuf,
+    pub(crate) target: Target,
+    pub(crate) design: Design,
 }
 
 impl Doc {
-    fn open(data_dir: &Path, args: &Args) -> Result<Doc> {
+    pub(crate) fn open(data_dir: &Path, args: &Args) -> Result<Doc> {
         let app_id = args.u64("app_id")?;
         if store(data_dir)?.app(app_id).map_err(|error| error.to_string())?.is_none() {
             return Err(format!(
@@ -515,16 +528,16 @@ impl Doc {
         })
     }
 
-    fn save(&self) -> Result<()> {
+    pub(crate) fn save(&self) -> Result<()> {
         write_atomic(&self.folder.join(self.target.file_name()), &self.design.to_json())
             .map_err(|error| format!("Couldn't save the design: {error}"))
     }
 
-    fn next_id(&self) -> u64 {
+    pub(crate) fn next_id(&self) -> u64 {
         self.design.max_id() + 1
     }
 
-    fn slide(&mut self, index: usize) -> Result<&mut Slide> {
+    pub(crate) fn slide(&mut self, index: usize) -> Result<&mut Slide> {
         let count = self.design.slides.len();
         self.design
             .slides
@@ -533,7 +546,7 @@ impl Doc {
     }
 
     /// (slide index, layer index) of a layer.
-    fn find(&self, id: u64) -> Result<(usize, usize)> {
+    pub(crate) fn find(&self, id: u64) -> Result<(usize, usize)> {
         self.design
             .slides
             .iter()
@@ -562,6 +575,8 @@ impl Doc {
                 "duration": slide.duration,
                 "starts_at": motion::scene_start(&self.design.slides, index),
                 "background": slide.background,
+                "spin": slide.spin,
+                "camera": slide.camera,
                 "layers": slide.layers,
             })).collect::<Vec<_>>(),
             "note": if self.design.slides.is_empty() {
@@ -587,6 +602,8 @@ fn add_slide(doc: &mut Doc, args: &Args) -> Result<Value> {
     } else {
         Slide {
             duration: appdoctor_screenshots::motion::DEFAULT_SCENE,
+            spin: 0.,
+            camera: Vec::new(),
             background: doc
                 .design
                 .slides
@@ -706,7 +723,7 @@ fn arrange_layer(doc: &mut Doc, args: &Args) -> Result<Value> {
 }
 
 /// A file path from the agent, with `~/` expanded, that exists.
-fn local_file(path: &str) -> Result<PathBuf> {
+pub(crate) fn local_file(path: &str) -> Result<PathBuf> {
     let path = match path.strip_prefix("~/") {
         Some(rest) => std::env::var_os("HOME")
             .map(|home| PathBuf::from(home).join(rest))
@@ -725,7 +742,7 @@ fn import(path: &str, folder: &Path) -> Result<(String, (f32, f32))> {
 }
 
 /// An image or a screen recording, for a device's screen.
-fn import_screen(path: &str, folder: &Path) -> Result<String> {
+pub(crate) fn import_screen(path: &str, folder: &Path) -> Result<String> {
     let path = local_file(path)?;
     import_media(&path, folder).map_err(|error| format!("Couldn't use {}: {error}", path.display()))
 }
@@ -756,7 +773,11 @@ fn apply(layer: &mut Layer, args: &Args, folder: &Path, new: bool) -> Result<Vec
             align,
             font,
             italic,
+            accent,
         } => {
+            if let Some(value) = args.color("accent")? {
+                *accent = Some(value);
+            }
             if let Some(words) = args.opt_str("text") {
                 *text = words.to_owned();
                 if new || args.opt_str("name").is_none() {
@@ -799,9 +820,13 @@ fn apply(layer: &mut Layer, args: &Args, folder: &Path, new: bool) -> Result<Vec
             screenshot,
             shadow,
             clip_start,
+            clip_speed,
         } => {
             if let Some(value) = args.opt_f32("clip_start")? {
                 *clip_start = value.max(0.);
+            }
+            if let Some(value) = args.opt_f32("clip_speed")? {
+                *clip_speed = value.clamp(0.1, 8.);
             }
             if let Some(slug) = args.opt_str("model") {
                 let next = DeviceModel::from_slug(slug)
@@ -835,7 +860,26 @@ fn apply(layer: &mut Layer, args: &Args, folder: &Path, new: bool) -> Result<Vec
                 *shadow = value;
             }
         }
-        LayerKind::Shape { fill, radius } => {
+        LayerKind::Shape {
+            fill,
+            radius,
+            fill_opacity,
+            stroke,
+            stroke_width,
+            soft,
+        } => {
+            if let Some(value) = args.opt_f32("fill_opacity")? {
+                *fill_opacity = value.clamp(0., 1.);
+            }
+            if let Some(value) = args.color("stroke")? {
+                *stroke = Some(value);
+            }
+            if let Some(value) = args.opt_f32("stroke_width")? {
+                *stroke_width = value.max(0.);
+            }
+            if let Some(value) = args.opt_f32("soft")? {
+                *soft = value.max(0.);
+            }
             if let Some(value) = args.color("fill")? {
                 *fill = value;
             }
