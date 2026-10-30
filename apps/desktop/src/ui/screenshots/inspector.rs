@@ -563,7 +563,24 @@ impl ScreenshotsView {
                             .on_select(cx.listener(|this, ix: &usize, window, cx| {
                                 this.set_transition(Transition::ALL[*ix], window, cx)
                             }));
+                        let sounds = video.sound_effects;
                         this.child(separator(cx))
+                            .child(row(
+                                "Sound effects",
+                                Switch::new("sound-effects").checked(sounds).on_click(cx.listener(
+                                    move |this, checked: &bool, window, cx| {
+                                        if *checked != sounds {
+                                            this.apply(window, cx, |this| {
+                                                if let Some(video) = &mut this.design.video {
+                                                    video.sound_effects = !sounds;
+                                                }
+                                            });
+                                        }
+                                    },
+                                )),
+                                cx,
+                            ))
+                            .child(separator(cx))
                             .child(stacked(
                                 "This scene",
                                 Some(format!("{scene:.1} s")),

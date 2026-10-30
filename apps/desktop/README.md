@@ -90,7 +90,7 @@ the open-source app-store-scraper.
 
 **MCP server** (`crates/mcp`). `appdoctor mcp` runs the same binary as a
 JSON-RPC server on stdin and stdout, with no window and no network. Today it
-has 29 tools:
+has 31 tools:
 - reading: `list_apps`, `get_design`, `design_options`, `list_fonts`;
 - editing: `add_slide`, `delete_slide`, `move_slide`, `set_background`,
   `add_layer`, `update_layer`, `delete_layer`, `arrange_layer`;
@@ -263,8 +263,19 @@ Every section in the sidebar is a page of this one window.
       recordings are composited between SVG passes. A 9 s iPhone preview
       exports in about 9 s, a 4K-wide header at about 3 s per second of
       video.
-    - Not done yet: a silent audio track (Apple's spec doesn't say previews
-      need one), per-layer keyframes beyond the effects, and Windows
+    - Sound. *Sound effects* in the Video section synthesizes a whoosh on
+      each push, a pop when something pops in, a tap on tap callouts and a
+      rise into each zoom. AppDoctor generates these itself: no samples are
+      shipped and no voices are used.
+      - Agents can also place audio files (music, a voice-over they made)
+        or effects on the timeline with `add_sound`.
+      - The export mixes everything to 48 kHz stereo and encodes AAC at 256
+        kbps (Apple's spec) with the system's `afconvert`. It then muxes the
+        sound under the H.264 picture through AVFoundation without
+        re-encoding.
+      - App previews always get a sound track, silent if nothing plays.
+      - The editor's preview doesn't play sound yet.
+    - Not done yet: per-layer keyframes beyond the effects, and Windows
       (`appdoctor-video` reports it unsupported there).
   - *AI agent* connects your own AI app; see "MCP server" above. Its edits
     show up live and undo with ⌘Z.

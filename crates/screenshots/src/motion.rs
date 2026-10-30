@@ -20,6 +20,13 @@ pub struct Video {
     /// Seconds a transition takes, at the end of the scene it leaves.
     #[serde(default = "half")]
     pub transition_length: f32,
+    /// Synthesized sounds on the motion: a whoosh on each push, a pop when
+    /// something pops in, a tap on tap callouts, a rise into each zoom.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub sound_effects: bool,
+    /// Sounds placed on the timeline: music, a voice, or effects.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub audio: Vec<Sound>,
 }
 
 impl Default for Video {
@@ -28,8 +35,76 @@ impl Default for Video {
             fps: 30,
             transition: Transition::Push,
             transition_length: 0.5,
+            sound_effects: false,
+            audio: Vec::new(),
         }
     }
+}
+
+/// A sound synthesized by AppDoctor, no file needed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SoundEffect {
+    Whoosh,
+    Pop,
+    Tap,
+    Rise,
+    Chime,
+    Click,
+}
+
+impl SoundEffect {
+    pub const ALL: [SoundEffect; 6] = [
+        SoundEffect::Whoosh,
+        SoundEffect::Pop,
+        SoundEffect::Tap,
+        SoundEffect::Rise,
+        SoundEffect::Chime,
+        SoundEffect::Click,
+    ];
+
+    pub fn slug(self) -> &'static str {
+        match self {
+            SoundEffect::Whoosh => "whoosh",
+            SoundEffect::Pop => "pop",
+            SoundEffect::Tap => "tap",
+            SoundEffect::Rise => "rise",
+            SoundEffect::Chime => "chime",
+            SoundEffect::Click => "click",
+        }
+    }
+
+    pub fn from_slug(slug: &str) -> Option<SoundEffect> {
+        SoundEffect::ALL.into_iter().find(|e| e.slug() == slug)
+    }
+}
+
+/// A sound on the video's timeline: a file in the design's folder (music,
+/// a voice) or a synthesized effect.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Sound {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect: Option<SoundEffect>,
+    /// Seconds into the video that it starts.
+    pub at: f32,
+    /// 0 to 1.
+    #[serde(default = "full")]
+    pub volume: f32,
+    /// Seconds into the file to start from.
+    #[serde(default)]
+    pub from: f32,
+    /// Seconds to play; to the file's (or the video's) end when unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub length: Option<f32>,
+    /// Seconds of fade in and out.
+    #[serde(default)]
+    pub fade: f32,
+}
+
+fn full() -> f32 {
+    1.
 }
 
 fn thirty() -> u32 {
@@ -303,6 +378,38 @@ impl Motion {
     pub fn is_still(&self) -> bool {
         *self == Motion::default()
     }
+}
+
+/// The sound effects the motion calls for, when the video has them on:
+/// (seconds into the video, effect, volume).
+pub fn sound_cues(slides: &[Slide], video: &Video) -> Vec<(f32, SoundEffect, f32)> {
+    let mut cues = Vec::new();
+    if !video.sound_effects {
+        return cues;
+    }
+    let last = slides.len().saturating_sub(1);
+    for (index, slide) in slides.iter().enumerate() {
+        let start = scene_start(slides, index);
+        if index < last && video.transition != Transition::Cut {
+            let length = video.transition_length.min(slide.duration / 2.);
+            let volume = if video.transition == Transition::Push { 0.55 } else { 0.3 };
+            cues.push((start + slide.duration - length, SoundEffect::Whoosh, volume));
+        }
+        for layer in slide.layers.iter().filter(|l| !l.hidden) {
+            let at = start + layer.motion.start;
+            match (layer.name.as_str(), layer.motion.enter) {
+                ("Tap", _) => cues.push((at, SoundEffect::Tap, 0.8)),
+                (_, Effect::Pop) => cues.push((at, SoundEffect::Pop, 0.55)),
+                (_, Effect::Slide) => cues.push((at, SoundEffect::Whoosh, 0.25)),
+                _ => {}
+            }
+        }
+        for focus in &slide.camera {
+            cues.push((start + focus.at, SoundEffect::Rise, 0.3));
+        }
+    }
+    cues.sort_by(|a, b| a.0.total_cmp(&b.0));
+    cues
 }
 
 /// Where a moment falls in the video.

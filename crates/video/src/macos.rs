@@ -16,7 +16,8 @@ use block2::RcBlock;
 use objc2::rc::{Retained, autoreleasepool};
 use objc2::runtime::AnyObject;
 use objc2_av_foundation::{
-    AVAssetImageGenerator, AVAssetWriter, AVAssetWriterInput, AVAssetWriterInputPixelBufferAdaptor,
+    AVAssetExportPresetPassthrough, AVAssetExportSession, AVAssetExportSessionStatus, AVMediaTypeAudio,
+    AVMutableComposition, AVAssetImageGenerator, AVAssetWriter, AVAssetWriterInput, AVAssetWriterInputPixelBufferAdaptor,
     AVAssetWriterStatus, AVFileTypeMPEG4, AVMediaTypeVideo, AVURLAsset, AVVideoAverageBitRateKey, AVVideoCodecKey,
     AVVideoCodecTypeH264, AVVideoCompressionPropertiesKey, AVVideoExpectedSourceFrameRateKey, AVVideoHeightKey,
     AVVideoMaxKeyFrameIntervalKey, AVVideoProfileLevelH264HighAutoLevel, AVVideoProfileLevelKey, AVVideoWidthKey,
@@ -25,7 +26,7 @@ use objc2_core_foundation::{CFRetained, CFString, CGPoint, CGRect, CGSize};
 use objc2_core_graphics::{
     CGBitmapContextCreate, CGColorSpace, CGContext, CGImage, CGImageAlphaInfo, CGImageByteOrderInfo,
 };
-use objc2_core_media::{CMTime, kCMTimeZero};
+use objc2_core_media::{CMTime, CMTimeRange, kCMTimeZero};
 use objc2_core_video::{
     CVPixelBuffer, CVPixelBufferGetBaseAddress, CVPixelBufferGetBytesPerRow, CVPixelBufferLockBaseAddress,
     CVPixelBufferLockFlags, CVPixelBufferPool, CVPixelBufferUnlockBaseAddress, kCVPixelBufferHeightKey,
@@ -211,6 +212,67 @@ impl Encoder {
 /// A recording's frame generator and its length, or `None` when the file
 /// couldn't be read.
 type Generator = Option<(Retained<AVAssetImageGenerator>, f32)>;
+
+/// Puts `audio` (an .m4a) under `video` (an .mp4) as `out`, without
+/// re-encoding either. The sound is cut to the picture's length.
+pub fn mux(video: &Path, audio: &Path, out: &Path) -> Result<()> {
+    let _ = std::fs::remove_file(out);
+    autoreleasepool(|_| unsafe {
+        let missing = || Error::Writer("AVFoundation is missing a setting".into());
+        let (video_type, audio_type) = (
+            AVMediaTypeVideo.ok_or_else(missing)?,
+            AVMediaTypeAudio.ok_or_else(missing)?,
+        );
+        let picture = AVURLAsset::URLAssetWithURL_options(&url(video), None);
+        let sound = AVURLAsset::URLAssetWithURL_options(&url(audio), None);
+        // The asynchronous loaders want a callback; on this worker thread
+        // the synchronous ones are simpler and fine for local files.
+        #[allow(deprecated)]
+        let tracks = |asset: &AVURLAsset, kind| asset.tracksWithMediaType(kind).firstObject();
+        let picture_track = tracks(&picture, video_type).ok_or_else(|| Error::Writer("the video has no picture".into()))?;
+        let sound_track = tracks(&sound, audio_type).ok_or_else(|| Error::Writer("the sound didn't encode".into()))?;
+        let composition = AVMutableComposition::composition();
+        let range = picture_track.timeRange();
+        let picture_out = composition
+            .addMutableTrackWithMediaType_preferredTrackID(video_type, 0)
+            .ok_or_else(missing)?;
+        picture_out
+            .insertTimeRange_ofTrack_atTime_error(range, &picture_track, kCMTimeZero)
+            .map_err(ns_error)?;
+        let sound_range = sound_track.timeRange();
+        let sound_range = if sound_range.duration.seconds() > range.duration.seconds() {
+            CMTimeRange {
+                start: sound_range.start,
+                duration: range.duration,
+            }
+        } else {
+            sound_range
+        };
+        let sound_out = composition
+            .addMutableTrackWithMediaType_preferredTrackID(audio_type, 0)
+            .ok_or_else(missing)?;
+        sound_out
+            .insertTimeRange_ofTrack_atTime_error(sound_range, &sound_track, kCMTimeZero)
+            .map_err(ns_error)?;
+        let session = AVAssetExportSession::exportSessionWithAsset_presetName(&composition, AVAssetExportPresetPassthrough)
+            .ok_or_else(|| Error::Writer("couldn't combine picture and sound".into()))?;
+        session.setOutputURL(Some(&url(out)));
+        session.setOutputFileType(Some(AVFileTypeMPEG4.ok_or_else(missing)?));
+        let (done, wait) = mpsc::channel();
+        let block = RcBlock::new(move || {
+            let _ = done.send(());
+        });
+        session.exportAsynchronouslyWithCompletionHandler(&block);
+        let _ = wait.recv_timeout(Duration::from_secs(300));
+        if session.status() == AVAssetExportSessionStatus::Completed {
+            Ok(())
+        } else {
+            Err(session
+                .error()
+                .map_or_else(|| Error::Writer("combining picture and sound failed".into()), ns_error))
+        }
+    })
+}
 
 /// Frames from screen recordings, one generator per file.
 pub struct Clips {

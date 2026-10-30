@@ -8,10 +8,12 @@ use std::path::Path;
 use appdoctor_screenshots::{Design, Target, motion, render_frame};
 
 #[cfg(target_os = "macos")]
+pub mod audio;
+#[cfg(target_os = "macos")]
 mod macos;
 
 #[cfg(target_os = "macos")]
-pub use macos::{Clips, Encoder, clip_duration};
+pub use macos::{Clips, Encoder, clip_duration, mux};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -62,6 +64,31 @@ fn bitrate(target: Target) -> u32 {
 /// holds the design's images and recordings. `progress` hears the share
 /// done (0 to 1) after each frame, and stops the export by returning false.
 pub fn export(design: &Design, images_dir: &Path, out: &Path, mut progress: impl FnMut(f32) -> bool) -> Result<()> {
+    // With sound, the picture goes to a temporary file first and the sound
+    // is muxed in after.
+    #[cfg(target_os = "macos")]
+    if audio::wants_audio(design) {
+        let picture = out.with_extension("picture.mp4");
+        let (wav, m4a) = (out.with_extension("sound.wav"), out.with_extension("sound.m4a"));
+        let result = (|| {
+            if !export_picture(design, images_dir, &picture, &mut progress)? {
+                return Ok(());
+            }
+            let length = motion::duration(&design.slides);
+            audio::write_wav(&wav, &audio::mix(design, images_dir, length)?)?;
+            audio::encode_aac(&wav, &m4a)?;
+            mux(&picture, &m4a, out)
+        })();
+        for temp in [&picture, &wav, &m4a] {
+            let _ = std::fs::remove_file(temp);
+        }
+        return result;
+    }
+    export_picture(design, images_dir, out, &mut progress).map(|_| ())
+}
+
+/// Renders and encodes the picture alone. False when `progress` stopped it.
+fn export_picture(design: &Design, images_dir: &Path, out: &Path, progress: &mut impl FnMut(f32) -> bool) -> Result<bool> {
     let video = design.video.clone().ok_or(Error::NotVideo)?;
     let size = design.target.video_size();
     let fps = video.fps.clamp(1, 60);
@@ -103,15 +130,15 @@ pub fn export(design: &Design, images_dir: &Path, out: &Path, mut progress: impl
                 if !progress((index + 1) as f32 / frames as f32) {
                     encoder.cancel();
                     let _ = std::fs::remove_file(out);
-                    return Ok(());
+                    return Ok(false);
                 }
             }
-            encoder.finish()
+            encoder.finish().map(|()| true)
         })
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (images_dir, out, &mut progress, width, height, frames);
+        let _ = (images_dir, out, progress, width, height, frames);
         Err(Error::Unsupported)
     }
 }
@@ -198,8 +225,44 @@ mod tests {
         })
         .unwrap();
         assert_eq!(calls, 20);
+        // Search videos get sound only when something plays: none here.
+        assert!(!audio::wants_audio(&design));
         assert!((clip_duration(&out).unwrap() - 2.).abs() < 0.15);
         assert!(length_problem(&design).unwrap().contains("short"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn exports_sound_effects_into_the_mp4() {
+        use appdoctor_screenshots::Effect;
+        let dir = std::env::temp_dir().join(format!("appdoctor-sound-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut id = 0;
+        let mut first = Slide {
+            duration: 1.,
+            ..Slide::starter(Target::Iphone, "One", &mut id)
+        };
+        first.layers[0].motion.enter = Effect::Pop;
+        let design = Design {
+            version: 2,
+            target: Target::Iphone,
+            video: Some(Video {
+                fps: 10,
+                sound_effects: true,
+                ..Video::default()
+            }),
+            slides: vec![first, Slide { duration: 1., ..Slide::starter(Target::Iphone, "Two", &mut id) }],
+        };
+        assert_eq!(motion::sound_cues(&design.slides, design.video.as_ref().unwrap()).len(), 2, "a pop and a whoosh");
+        let out = dir.join("preview.mp4");
+        export(&design, &dir, &out, |_| true).unwrap();
+        // The mp4 has picture and sound, and no temporary files are left.
+        let probe = std::process::Command::new("afinfo").arg(&out).output().unwrap();
+        let info = String::from_utf8_lossy(&probe.stdout);
+        assert!(info.contains("aac") || info.contains("AAC"), "{info}");
+        assert!((clip_duration(&out).unwrap() - 2.).abs() < 0.15);
+        let leftovers = std::fs::read_dir(&dir).unwrap().count();
+        assert_eq!(leftovers, 1);
         let _ = std::fs::remove_dir_all(dir);
     }
 }

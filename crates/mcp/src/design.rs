@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use appdoctor_screenshots::{
     Align, BACKGROUND_PRESETS, Background, DEFAULT_FONT, Design, DeviceModel, Drift, Effect, Frame, Layer, LayerKind,
-    SUGGESTED_FONTS, Slide, Target, Transition, Video, font_families, has_font, import_image, import_media, motion,
+    SUGGESTED_FONTS, Slide, Sound, SoundEffect, Target, Transition, Video, font_families, has_font, import_image, import_media, motion,
     parse_color, render_frame, render_png_with, write_atomic,
 };
 use appdoctor_store::Store;
@@ -251,24 +251,53 @@ fn design_tools() -> Vec<Value> {
                     "enabled": { "type": "boolean" },
                     "transition": { "type": "string", "enum": Transition::ALL.iter().map(|t| t.slug()).collect::<Vec<_>>() },
                     "transition_length": { "type": "number", "minimum": 0, "description": "Seconds; 0.5 by default." },
-                    "fps": { "type": "integer", "enum": [24, 30, 60], "description": "30 by default; app previews allow at most 30." }
+                    "fps": { "type": "integer", "enum": [24, 30, 60], "description": "30 by default; app previews allow at most 30." },
+                    "sound_effects": { "type": "boolean", "description": "Synthesized sounds on the motion: a whoosh on each push, a pop when something pops in, a tap on tap callouts, a rise into each zoom." }
                 }),
             ),
             &["app_id", "enabled"],
             false,
         ),
         tool(
+            "add_sound",
+            "Add a sound",
+            "Places a sound on the video's timeline: an audio file on this computer (music you may use, a voice-over you made, an effect you generated; mp3, m4a, wav, aiff) or one of AppDoctor's synthesized effects (whoosh, pop, tap, rise, chime, click). The export mixes everything to AAC stereo. Returns its index.",
+            with(
+                design_args(),
+                json!({
+                    "file": { "type": "string", "description": "Path to an audio file; it's copied into the design." },
+                    "effect": { "type": "string", "enum": ["whoosh", "pop", "tap", "rise", "chime", "click"] },
+                    "at": { "type": "number", "minimum": 0, "description": "Seconds into the video." },
+                    "volume": { "type": "number", "minimum": 0, "maximum": 2, "description": "1 by default." },
+                    "from": { "type": "number", "minimum": 0, "description": "Seconds into the file to start from." },
+                    "length": { "type": "number", "minimum": 0, "description": "Seconds to play; to the end by default." },
+                    "fade": { "type": "number", "minimum": 0, "description": "Seconds of fade in and out." }
+                }),
+            ),
+            &["app_id", "at"],
+            false,
+        ),
+        tool(
+            "remove_sound",
+            "Remove a sound",
+            "Removes a sound from the timeline by its index (get_design lists them under video.audio).",
+            with(design_args(), json!({ "index": { "type": "integer", "minimum": 0 } })),
+            &["app_id", "index"],
+            false,
+        ),
+        tool(
             "update_slide",
             "Change a slide",
-            "Sets how long a slide shows as a scene in the video, in seconds.",
+            "Sets how long a slide shows as a scene in the video, in seconds, and how its background turns.",
             with(
                 design_args(),
                 json!({
                     "slide": { "type": "integer", "minimum": 0 },
-                    "duration": { "type": "number", "minimum": 0.5, "maximum": 30 }
+                    "duration": { "type": "number", "minimum": 0.5, "maximum": 30 },
+                    "spin": { "type": "number", "description": "Degrees a second the gradient background turns, for movement behind still scenes (try 4 to 10)." }
                 }),
             ),
-            &["app_id", "slide", "duration"],
+            &["app_id", "slide"],
             false,
         ),
         tool(
@@ -331,7 +360,7 @@ pub fn call(data_dir: &Path, name: &str, args: &Value) -> Result<Vec<Value>> {
         "export_screenshots" => export(data_dir, &args),
         "export_video" => export_video(data_dir, &args),
         "add_slide" | "delete_slide" | "move_slide" | "set_background" | "add_layer" | "update_layer"
-        | "delete_layer" | "arrange_layer" | "set_video" | "update_slide" => {
+        | "delete_layer" | "arrange_layer" | "set_video" | "update_slide" | "add_sound" | "remove_sound" => {
             let mut doc = Doc::open(data_dir, &args)?;
             let result = match name {
                 "add_slide" => add_slide(&mut doc, &args),
@@ -342,6 +371,8 @@ pub fn call(data_dir: &Path, name: &str, args: &Value) -> Result<Vec<Value>> {
                 "update_layer" => update_layer(&mut doc, &args),
                 "delete_layer" => delete_layer(&mut doc, &args),
                 "set_video" => set_video(&mut doc, &args),
+                "add_sound" => add_sound(&mut doc, &args),
+                "remove_sound" => remove_sound(&mut doc, &args),
                 "update_slide" => update_slide(&mut doc, &args),
                 _ => arrange_layer(&mut doc, &args),
             }?;
@@ -566,6 +597,8 @@ impl Doc {
                 "transition": video.transition.slug(),
                 "transition_length": video.transition_length,
                 "fps": video.fps,
+                "sound_effects": video.sound_effects,
+                "audio": video.audio,
                 "length": motion::duration(&self.design.slides),
                 "size": self.target.video_size().pixels(),
                 "length_problem": appdoctor_video::length_problem(&self.design),
@@ -961,6 +994,9 @@ fn set_video(doc: &mut Doc, args: &Args) -> Result<Value> {
     if let Some(fps) = args.opt_u64("fps")? {
         video.fps = (fps as u32).clamp(1, 60);
     }
+    if let Some(on) = args.opt_bool("sound_effects")? {
+        video.sound_effects = on;
+    }
     let video = video.clone();
     Ok(json!({
         "video": video,
@@ -969,10 +1005,61 @@ fn set_video(doc: &mut Doc, args: &Args) -> Result<Value> {
     }))
 }
 
+fn add_sound(doc: &mut Doc, args: &Args) -> Result<Value> {
+    let file = match args.opt_str("file") {
+        Some(path) => {
+            let path = local_file(path)?;
+            let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("audio").to_ascii_lowercase();
+            let name = format!("sound-{}.{extension}", std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos()));
+            std::fs::create_dir_all(&doc.folder).map_err(|e| e.to_string())?;
+            std::fs::copy(&path, doc.folder.join(&name)).map_err(|e| format!("Couldn't copy {}: {e}", path.display()))?;
+            Some(name)
+        }
+        None => None,
+    };
+    let effect = args
+        .opt_str("effect")
+        .map(|slug| SoundEffect::from_slug(slug).ok_or("effect should be whoosh, pop, tap, rise, chime or click"))
+        .transpose()?;
+    if file.is_none() && effect.is_none() {
+        return Err("Give a file or an effect.".into());
+    }
+    let sound = Sound {
+        file,
+        effect,
+        at: args.opt_f32("at")?.ok_or("at is required")?.max(0.),
+        volume: args.opt_f32("volume")?.unwrap_or(1.).clamp(0., 2.),
+        from: args.opt_f32("from")?.unwrap_or(0.).max(0.),
+        length: args.opt_f32("length")?,
+        fade: args.opt_f32("fade")?.unwrap_or(0.).max(0.),
+    };
+    let video = doc.design.video.get_or_insert_with(Video::default);
+    video.audio.push(sound);
+    Ok(json!({ "index": video.audio.len() - 1, "sounds": video.audio.len() }))
+}
+
+fn remove_sound(doc: &mut Doc, args: &Args) -> Result<Value> {
+    let index = args.index("index")?;
+    let video = doc.design.video.as_mut().ok_or("The design has no video.")?;
+    if index >= video.audio.len() {
+        return Err(format!("There's no sound {index}; there are {}.", video.audio.len()));
+    }
+    video.audio.remove(index);
+    Ok(json!({ "sounds": video.audio.len() }))
+}
+
 fn update_slide(doc: &mut Doc, args: &Args) -> Result<Value> {
     let index = args.index("slide")?;
-    let duration = args.opt_f32("duration")?.ok_or("duration is required")?.clamp(0.5, 30.);
-    doc.slide(index)?.duration = duration;
+    let slide = doc.slide(index)?;
+    if let Some(duration) = args.opt_f32("duration")? {
+        slide.duration = duration.clamp(0.5, 30.);
+    }
+    if let Some(spin) = args.opt_f32("spin")? {
+        slide.spin = spin.clamp(-90., 90.);
+    }
+    let duration = slide.duration;
     Ok(json!({
         "slide": index,
         "duration": duration,

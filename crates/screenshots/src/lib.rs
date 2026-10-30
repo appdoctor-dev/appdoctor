@@ -29,7 +29,7 @@ use resvg::usvg;
 use serde::{Deserialize, Serialize};
 
 pub use device::{DeviceGeometry, DeviceModel, Frame, device_geometry};
-pub use motion::{Drift, Effect, Focus, Motion, Transition, Video};
+pub use motion::{Drift, Effect, Focus, Motion, Sound, SoundEffect, Transition, Video};
 pub use render::{ClipSource, NoClips, render_frame, render_png, render_png_with, render_slide};
 pub use svg::to_svg;
 pub use themes::{THEMES, Theme, theme};
