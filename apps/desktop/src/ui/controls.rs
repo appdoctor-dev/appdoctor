@@ -281,3 +281,110 @@ impl RenderOnce for Segmented {
             .child(h_flex().absolute().top_0().left(px(INSET)).h_full().children(segments))
     }
 }
+
+// Form pieces for the settings-style pages.
+
+/// The soft rounded well a borderless input sits in.
+pub fn well(cx: &App) -> Div {
+    h_flex()
+        .min_h(px(28.))
+        .px(px(4.))
+        .items_center()
+        .rounded(px(7.))
+        .bg(cx.theme().foreground.opacity(0.06))
+}
+
+/// A single-line text field for a group row; size it with `.w()`.
+pub fn text_field(input: &Entity<InputState>, cx: &App) -> Div {
+    well(cx).child(
+        div()
+            .flex_1()
+            .min_w_0()
+            .child(Input::new(input).appearance(false).small()),
+    )
+}
+
+/// Explanatory text under a group, as System Settings sets it.
+pub fn footnote(text: impl Into<SharedString>, cx: &App) -> Div {
+    div()
+        .px(px(4.))
+        .pt(px(7.))
+        .text_size(px(12.))
+        .line_height(px(16.))
+        .text_color(cx.theme().muted_foreground)
+        .child(text.into())
+}
+
+/// A group whose rows are divided by separators.
+pub fn rows(items: impl IntoIterator<Item = AnyElement>, cx: &App) -> Div {
+    let mut list = group(cx);
+    for (ix, item) in items.into_iter().enumerate() {
+        if ix > 0 {
+            list = list.child(separator(cx));
+        }
+        list = list.child(item);
+    }
+    list
+}
+
+/// A read-only label/value list, for confirmation dialogs.
+pub fn summary(items: impl IntoIterator<Item = (String, String)>, cx: &App) -> Div {
+    let muted = cx.theme().muted_foreground;
+    rows(
+        items.into_iter().map(|(name, value)| {
+            h_flex()
+                .px(px(10.))
+                .py(px(8.))
+                .gap(px(16.))
+                .items_start()
+                .justify_between()
+                .text_size(px(13.))
+                .child(div().flex_shrink_0().text_color(muted).child(name))
+                .child(div().min_w_0().text_right().child(value))
+                .into_any_element()
+        }),
+        cx,
+    )
+}
+
+/// A radio button: the accent with a white dot when chosen.
+pub fn radio(chosen: bool, cx: &App) -> Div {
+    let theme = cx.theme();
+    div()
+        .size(px(16.))
+        .flex_shrink_0()
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded_full()
+        .map(|this| {
+            if chosen {
+                this.bg(theme.primary)
+                    .child(div().size(px(6.)).rounded_full().bg(hsla(0., 0., 1., 1.)))
+            } else {
+                this.bg(theme.foreground.opacity(0.06))
+                    .border_1()
+                    .border_color(theme.foreground.opacity(0.25))
+            }
+        })
+}
+
+/// The outcome of an action in a tinted strip: a green dot when it worked,
+/// red text when it didn't.
+pub fn banner(result: &Result<String, String>, cx: &App) -> Div {
+    let theme = cx.theme();
+    let (color, text, text_color) = match result {
+        Ok(text) => (crate::theme::meter::up(), text, theme.foreground),
+        Err(text) => (theme.danger, text, theme.danger),
+    };
+    h_flex()
+        .gap(px(8.))
+        .px(px(10.))
+        .py(px(7.))
+        .items_center()
+        .rounded(px(8.))
+        .bg(color.opacity(0.1))
+        .text_size(px(12.))
+        .child(div().size(px(7.)).flex_shrink_0().rounded_full().bg(color))
+        .child(div().flex_1().min_w_0().text_color(text_color).child(text.clone()))
+}

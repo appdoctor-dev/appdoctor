@@ -15,7 +15,8 @@ use crate::runtime;
 use crate::services::Services;
 use crate::state::{AppState, Section};
 use crate::theme::meter;
-use crate::ui::widgets::{self, card, pill, status_dot};
+use crate::ui::controls;
+use crate::ui::widgets::{self, pill};
 
 /// What App Store Connect says about the selected app.
 #[derive(Clone)]
@@ -157,27 +158,25 @@ impl ReleaseView {
         let view = cx.entity().downgrade();
         window.open_dialog(cx, move |dialog, _, cx| {
             let theme = cx.theme();
-            let rows = plan.summary_rows().into_iter().map(|(label, value)| {
-                h_flex()
-                    .gap_3()
-                    .text_sm()
-                    .child(div().w(px(100.)).flex_shrink_0().text_color(theme.muted_foreground).child(label))
-                    .child(div().flex_1().child(value))
-            });
+            let rows = plan
+                .summary_rows()
+                .into_iter()
+                .map(|(label, value)| (label.to_owned(), value));
             let (submit_view, submit_plan) = (view.clone(), plan.clone());
             dialog
                 .title("Submit to App Review?")
                 .w(px(520.))
                 .child(
                     v_flex()
-                        .gap_2()
-                        .child(div().text_sm().text_color(theme.muted_foreground).child(
+                        .gap(px(12.))
+                        .child(div().text_size(px(13.)).text_color(theme.muted_foreground).child(
                             "This sends the version below to Apple for review. You can withdraw it while it waits, but Apple sees the submission.",
                         ))
-                        .children(rows)
+                        .child(controls::summary(rows, cx))
                         .when(plan.uses_non_exempt_encryption.is_none(), |this| {
-                            this.child(div().text_sm().text_color(theme.warning).child(
-                                "Export compliance isn't answered for this build; App Review may hold it until it is.",
+                            this.child(controls::banner(
+                                &Err("Export compliance isn't answered for this build; App Review may hold it until it is.".into()),
+                                cx,
                             ))
                         }),
                 )
@@ -229,15 +228,31 @@ impl ReleaseView {
 
     fn confirm_withdraw(&mut self, submission: ReviewSubmission, window: &mut Window, cx: &mut Context<Self>) {
         let view = cx.entity().downgrade();
+        let app_name = self.loaded.as_ref().map(|l| l.app_name.clone()).unwrap_or_default();
         window.open_dialog(cx, move |dialog, _, cx| {
             let (view, id) = (view.clone(), submission.id.clone());
+            let rows = [
+                ("App".to_owned(), app_name.clone()),
+                ("Status".to_owned(), submission.state.label().to_string()),
+                (
+                    "Submitted".to_owned(),
+                    submission
+                        .submitted_date
+                        .as_deref()
+                        .map_or_else(|| "Not sent".to_owned(), short_date),
+                ),
+            ];
             dialog
                 .title("Withdraw from App Review?")
                 .w(px(460.))
-                .child(div().text_sm().text_color(cx.theme().muted_foreground).child(format!(
-                    "The submission ({}) goes back to a draft. You'll need to submit again, which restarts the review queue.",
-                    submission.state.label()
-                )))
+                .child(
+                    v_flex()
+                        .gap(px(12.))
+                        .child(div().text_size(px(13.)).text_color(cx.theme().muted_foreground).child(
+                            "The submission goes back to a draft. You'll need to submit again, which restarts the review queue.",
+                        ))
+                        .child(controls::summary(rows, cx)),
+                )
                 .footer(
                     h_flex()
                         .w_full()
@@ -283,95 +298,129 @@ impl ReleaseView {
         .detach();
     }
 
-    fn builds_card(&self, loaded: &Loaded, cx: &mut Context<Self>) -> impl IntoElement {
+    fn version_group(&self, loaded: &Loaded, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
-        let rows = loaded.builds.iter().take(12).map(|build| {
-            let selected = self.selected_build.as_deref() == Some(build.id.as_str());
-            let ready = build.is_ready();
-            let id = build.id.clone();
-            h_flex()
-                .id(SharedString::from(format!("build-{}", build.id)))
-                .px_3()
-                .py_2()
-                .gap_3()
+        let control = match &loaded.version {
+            Some(version) => h_flex()
+                .gap_2()
                 .items_center()
-                .rounded(theme.radius)
-                .text_sm()
-                .when(selected, |this| this.bg(theme.primary.opacity(0.1)))
-                .when(ready, |this| {
-                    this.cursor_pointer()
-                        .hover(|style| style.bg(theme.muted.opacity(0.6)))
-                        .on_click(cx.listener(move |this, _, _, cx| {
+                .text_size(px(13.))
+                .child(
+                    div()
+                        .font_weight(FontWeight::MEDIUM)
+                        .child(version.version.clone().unwrap_or_default()),
+                )
+                .child(pill(state_label(version.state.as_deref()), theme.primary)),
+            None => h_flex()
+                .text_size(px(13.))
+                .text_color(theme.muted_foreground)
+                .child("None being prepared"),
+        };
+        let section = section("Version", controls::rows([controls::row("iOS", control, cx).into_any_element()], cx), cx);
+        if loaded.version.is_none() {
+            section.child(controls::footnote(
+                "Create the next version in App Store Connect, then refresh.",
+                cx,
+            ))
+        } else {
+            section
+        }
+    }
+
+    fn builds_group(&self, loaded: &Loaded, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme().clone();
+        let rows: Vec<AnyElement> = loaded
+            .builds
+            .iter()
+            .take(12)
+            .map(|build| {
+                let selected = self.selected_build.as_deref() == Some(build.id.as_str());
+                let ready = build.is_ready();
+                let id = build.id.clone();
+                h_flex()
+                    .id(SharedString::from(format!("build-{}", build.id)))
+                    .min_h(px(38.))
+                    .px(px(10.))
+                    .gap(px(10.))
+                    .items_center()
+                    .text_size(px(13.))
+                    .when(!ready, |this| this.opacity(0.5))
+                    .when(ready, |this| {
+                        this.cursor_pointer().on_click(cx.listener(move |this, _, _, cx| {
                             this.selected_build = Some(id.clone());
                             cx.notify();
                         }))
-                })
-                .child(
-                    div()
-                        .size(px(14.))
-                        .rounded_full()
-                        .border_1()
-                        .border_color(if selected { theme.primary } else { theme.border })
-                        .when(selected, |this| this.border_4()),
-                )
-                .child(div().w(px(140.)).font_weight(FontWeight::MEDIUM).child(build.label()))
-                .child(pill(
-                    if build.expired {
-                        "EXPIRED".to_owned()
-                    } else {
-                        build.processing_state.clone()
-                    },
-                    if ready { meter::up() } else { theme.muted_foreground },
-                ))
-                .child(div().flex_1())
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(theme.muted_foreground)
-                        .child(build.uploaded_date.clone().unwrap_or_default()),
-                )
-        });
-        card(cx)
-            .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child("Build"))
-            .when(loaded.builds.is_empty(), |this| {
-                this.child(div().text_sm().text_color(theme.muted_foreground).child(
-                    "No builds uploaded yet. Upload one from Xcode, Transporter or `xcrun altool --upload-package`.",
-                ))
+                    })
+                    .child(controls::radio(selected, cx))
+                    .child(div().font_weight(FontWeight::MEDIUM).child(build.label()))
+                    .child(pill(
+                        if build.expired {
+                            "Expired".to_owned()
+                        } else {
+                            state_label(Some(build.processing_state.as_str()))
+                        },
+                        if ready { meter::up() } else { theme.muted_foreground },
+                    ))
+                    .child(div().flex_1())
+                    .child(
+                        div()
+                            .text_size(px(12.))
+                            .text_color(theme.muted_foreground)
+                            .child(build.uploaded_date.clone().map(|date| short_date(&date)).unwrap_or_default()),
+                    )
+                    .into_any_element()
             })
-            .children(rows)
+            .collect();
+        if rows.is_empty() {
+            return section(
+                "Build",
+                controls::rows(
+                    [div()
+                        .px(px(10.))
+                        .py(px(11.))
+                        .text_size(px(13.))
+                        .text_color(theme.muted_foreground)
+                        .child("No builds uploaded yet.")
+                        .into_any_element()],
+                    cx,
+                ),
+                cx,
+            )
+            .child(controls::footnote(
+                "Upload one from Xcode, Transporter or `xcrun altool --upload-package`, then refresh.",
+                cx,
+            ));
+        }
+        section("Build", controls::rows(rows, cx), cx).child(controls::footnote(
+            "Only builds Apple has finished processing can be submitted.",
+            cx,
+        ))
     }
 
-    fn release_card(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let option = |id: &'static str, label: &'static str, value: ReleaseType, cx: &mut Context<Self>| {
-            Button::new(id)
-                .small()
-                .label(label)
-                .when(self.release_type == value, |button| button.primary())
-                .when(self.release_type != value, |button| button.outline())
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.release_type = value;
-                    cx.notify();
-                }))
-        };
-        card(cx)
-            .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child("Release"))
-            .child(
-                h_flex()
-                    .gap_2()
-                    .child(option("release-manual", "Manually", ReleaseType::Manual, cx))
-                    .child(option("release-auto", "When approved", ReleaseType::AfterApproval, cx)),
-            )
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(self.release_type.describe()),
-            )
+    fn release_group(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let release = controls::Segmented::new("release-type", 230.)
+            .label("Manually")
+            .label("When Approved")
+            .selected(usize::from(self.release_type == ReleaseType::AfterApproval))
+            .on_select(cx.listener(|this, ix: &usize, _, cx| {
+                this.release_type = if *ix == 0 {
+                    ReleaseType::Manual
+                } else {
+                    ReleaseType::AfterApproval
+                };
+                cx.notify();
+            }));
+        section(
+            "Release",
+            controls::rows([controls::row("Release", release, cx).into_any_element()], cx),
+            cx,
+        )
+        .child(controls::footnote(self.release_type.describe(), cx))
     }
 
-    fn submissions_card(&self, loaded: &Loaded, cx: &mut Context<Self>) -> impl IntoElement {
+    fn submissions_group(&self, loaded: &Loaded, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
-        let rows: Vec<_> = loaded
+        let mut rows: Vec<AnyElement> = loaded
             .submissions
             .iter()
             .take(8)
@@ -380,21 +429,25 @@ impl ReleaseView {
                     && submission.state != appdoctor_asc::ReviewSubmissionState::ReadyForReview;
                 let target = submission.clone();
                 h_flex()
-                    .gap_3()
+                    .min_h(px(38.))
+                    .px(px(10.))
+                    .gap(px(10.))
                     .items_center()
-                    .text_sm()
+                    .text_size(px(13.))
                     .child(pill(submission.state.label(), theme.primary))
                     .child(
-                        div()
-                            .text_color(theme.muted_foreground)
-                            .child(submission.submitted_date.clone().unwrap_or_else(|| "Not sent".into())),
+                        div().text_color(theme.muted_foreground).child(
+                            submission
+                                .submitted_date
+                                .as_deref()
+                                .map_or_else(|| "Not sent".to_owned(), short_date),
+                        ),
                     )
                     .child(div().flex_1())
                     .when(can_cancel, |this| {
                         this.child(
                             Button::new(SharedString::from(format!("withdraw-{}", submission.id)))
                                 .small()
-                                .ghost()
                                 .label("Withdraw…")
                                 .disabled(self.busy)
                                 .on_click(cx.listener(move |this, _, window, cx| {
@@ -402,19 +455,47 @@ impl ReleaseView {
                                 })),
                         )
                     })
+                    .into_any_element()
             })
             .collect();
-        card(cx)
-            .child(
+        if rows.is_empty() {
+            rows.push(
                 div()
-                    .text_sm()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child("Review submissions"),
-            )
-            .when(rows.is_empty(), |this| {
-                this.child(div().text_sm().text_color(theme.muted_foreground).child("None yet."))
-            })
-            .children(rows)
+                    .px(px(10.))
+                    .py(px(11.))
+                    .text_size(px(13.))
+                    .text_color(theme.muted_foreground)
+                    .child("None yet.")
+                    .into_any_element(),
+            );
+        }
+        section("Review submissions", controls::rows(rows, cx), cx)
+    }
+}
+
+/// The widest the page grows.
+const COLUMN: f32 = 680.;
+
+/// A heading over a group.
+fn section(title: &str, body: impl IntoElement, cx: &App) -> Div {
+    v_flex().child(controls::heading(title.to_owned(), cx)).child(body)
+}
+
+/// App Store Connect's SCREAMING_CASE states as words: "Prepare for submission".
+fn state_label(state: Option<&str>) -> String {
+    let words = state.unwrap_or_default().replace('_', " ").to_lowercase();
+    let mut chars = words.chars();
+    chars
+        .next()
+        .map(|first| first.to_uppercase().chain(chars).collect())
+        .unwrap_or_default()
+}
+
+/// "2026-10-29T14:03:11-07:00" → "2026-10-29 14:03".
+fn short_date(date: &str) -> String {
+    match date.split_once('T') {
+        Some((day, time)) => format!("{day} {}", time.get(..5).unwrap_or(time)),
+        None => date.to_owned(),
     }
 }
 
@@ -423,7 +504,6 @@ impl Render for ReleaseView {
         let services = self.services(cx);
         let app = self.state.read(cx).selected().cloned();
         let has_key = services.has_asc_key();
-        let muted = cx.theme().muted_foreground;
 
         if !has_key {
             return widgets::empty_state(
@@ -450,83 +530,64 @@ impl Render for ReleaseView {
         let loaded = self.loaded.clone();
         let can_review = loaded.as_ref().is_some_and(|l| l.version.is_some()) && self.selected_build.is_some();
 
-        v_flex()
+        div()
             .id("release-page")
             .size_full()
             .overflow_y_scroll()
-            .p_6()
-            .gap_4()
             .child(
-                h_flex()
-                    .items_start()
-                    .child(div().flex_1().child(widgets::page_header(
-                        &format!("Submit {} for review", app.name),
-                        "Choose a processed build and how it releases. Nothing is sent until you confirm the summary.",
-                        cx,
-                    )))
-                    .child(
-                        Button::new("load-release")
-                            .small()
-                            .outline()
-                            .icon(IconName::RefreshCw)
-                            .label(if loaded.is_some() {
-                                "Refresh"
-                            } else {
-                                "Load from App Store Connect"
-                            })
-                            .loading(self.loading)
-                            .disabled(self.loading)
-                            .on_click(cx.listener(|this, _, _, cx| this.load(cx))),
-                    ),
-            )
-            .when_some(self.status.clone(), |this, status| {
-                let (color, text) = match status {
-                    Ok(text) => (meter::up(), text),
-                    Err(text) => (cx.theme().danger, text),
-                };
-                this.child(
-                    h_flex()
-                        .gap_2()
-                        .items_center()
-                        .text_sm()
-                        .child(status_dot(color))
-                        .child(div().text_color(color).child(text)),
-                )
-            })
-            .when_some(loaded, |this, loaded| {
-                this.child(
-                    card(cx)
-                        .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child("Version"))
-                        .child(match &loaded.version {
-                            Some(version) => h_flex()
-                                .gap_2()
-                                .items_center()
-                                .text_sm()
+                h_flex().w_full().justify_center().child(
+                    v_flex()
+                        .w_full()
+                        .max_w(px(COLUMN))
+                        .px_6()
+                        .pt(px(28.))
+                        .pb(px(40.))
+                        .gap(px(24.))
+                        .child(
+                            h_flex()
+                                .gap_4()
+                                .items_start()
+                                .child(div().flex_1().child(widgets::page_header(
+                                    &format!("Submit {} for review", app.name),
+                                    "Choose a processed build and how it releases. Nothing is sent until you confirm the summary.",
+                                    cx,
+                                )))
                                 .child(
-                                    div()
-                                        .font_weight(FontWeight::MEDIUM)
-                                        .child(version.version.clone().unwrap_or_default()),
+                                    Button::new("load-release")
+                                        .small()
+                                        .icon(IconName::RefreshCw)
+                                        .label(if loaded.is_some() {
+                                            "Refresh"
+                                        } else {
+                                            "Load from App Store Connect"
+                                        })
+                                        .loading(self.loading)
+                                        .disabled(self.loading)
+                                        .on_click(cx.listener(|this, _, _, cx| this.load(cx))),
+                                ),
+                        )
+                        .when_some(self.status.as_ref(), |this, status| {
+                            this.child(controls::banner(status, cx))
+                        })
+                        .when_some(loaded, |this, loaded| {
+                            this.child(self.version_group(&loaded, cx))
+                                .child(self.builds_group(&loaded, cx))
+                                .child(
+                                    v_flex().child(self.release_group(cx)).child(
+                                        h_flex().pt(px(14.)).justify_end().child(
+                                            Button::new("review-submission")
+                                                .primary()
+                                                .label("Review and Submit…")
+                                                .loading(self.busy)
+                                                .disabled(self.busy || !can_review)
+                                                .on_click(cx.listener(|this, _, window, cx| this.review(window, cx))),
+                                        ),
+                                    ),
                                 )
-                                .child(pill(version.state.clone().unwrap_or_default(), cx.theme().primary)),
-                            None => h_flex().text_sm().text_color(muted).child(
-                                "No editable iOS version. Create the next version in App Store Connect, then refresh.",
-                            ),
+                                .child(self.submissions_group(&loaded, cx))
                         }),
-                )
-                .child(self.builds_card(&loaded, cx))
-                .child(self.release_card(cx))
-                .child(
-                    h_flex().child(
-                        Button::new("review-submission")
-                            .primary()
-                            .label("Review and submit…")
-                            .loading(self.busy)
-                            .disabled(self.busy || !can_review)
-                            .on_click(cx.listener(|this, _, window, cx| this.review(window, cx))),
-                    ),
-                )
-                .child(self.submissions_card(&loaded, cx))
-            })
+                ),
+            )
             .into_any_element()
     }
 }

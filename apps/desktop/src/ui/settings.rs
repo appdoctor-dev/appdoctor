@@ -7,9 +7,9 @@ use appdoctor_entitlement::Status;
 use appdoctor_secrets::{AppleAdsKey, AscKey, Secret};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::clipboard::Clipboard;
-use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::component::input::InputState;
 use gpui_kit::component::notification::Notification;
-use gpui_kit::component::{ActiveTheme as _, Disableable as _, IconName, Sizable as _, WindowExt as _, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme as _, Disableable as _, Icon, Sizable as _, WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -17,7 +17,8 @@ use crate::entitlement;
 use crate::runtime;
 use crate::state::{AppState, UpdateStatus};
 use crate::theme::meter;
-use crate::ui::widgets::{self, card, pill, status_dot};
+use crate::ui::controls;
+use crate::ui::widgets::{self, status_dot};
 
 pub struct SettingsView {
     state: Entity<AppState>,
@@ -63,7 +64,7 @@ impl SettingsView {
             api_base: cx.new(|cx| input("http://localhost:8787", &api_base, window, cx)),
             asc_issuer: cx.new(|cx| {
                 input(
-                    "Issuer ID, e.g. 57246542-96fe-1a63-e053-0824d011072a",
+                    "57246542-96fe-1a63-e053-0824d011072a",
                     asc.as_ref().map_or("", |key| &key.issuer_id),
                     window,
                     cx,
@@ -71,7 +72,7 @@ impl SettingsView {
             }),
             asc_key_id: cx.new(|cx| {
                 input(
-                    "Key ID, e.g. 2X9R4HXF34",
+                    "2X9R4HXF34",
                     asc.as_ref().map_or("", |key| &key.key_id),
                     window,
                     cx,
@@ -81,9 +82,9 @@ impl SettingsView {
             asc_saved: asc.map(|key| (key.issuer_id, key.key_id)),
             asc_busy: false,
             asc_result: None,
-            ads_client_id: cx.new(|cx| input("clientId  SEARCHADS.…", &ads_ids.client_id, window, cx)),
-            ads_team_id: cx.new(|cx| input("teamId  SEARCHADS.…", &ads_ids.team_id, window, cx)),
-            ads_key_id: cx.new(|cx| input("keyId", &ads_ids.key_id, window, cx)),
+            ads_client_id: cx.new(|cx| input("SEARCHADS.…", &ads_ids.client_id, window, cx)),
+            ads_team_id: cx.new(|cx| input("SEARCHADS.…", &ads_ids.team_id, window, cx)),
+            ads_key_id: cx.new(|cx| input("Key ID", &ads_ids.key_id, window, cx)),
             ads_key: ads,
             ads_public_pem,
             ads_busy: false,
@@ -386,393 +387,463 @@ impl SettingsView {
 
     // Rendering
 
-    fn section(&self, title: &str, description: &str, cx: &App) -> Div {
-        card(cx).w_full().max_w(px(760.)).child(
-            v_flex()
-                .gap_1()
-                .child(
-                    div()
-                        .text_base()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child(title.to_owned()),
-                )
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(description.to_owned()),
-                ),
-        )
+    /// A section as System Settings draws one: a heading, the group, then
+    /// whatever follows it (buttons, an outcome, a footnote).
+    fn section(title: &str, body: impl IntoElement, cx: &App) -> Div {
+        v_flex().child(controls::heading(title.to_owned(), cx)).child(body)
     }
 
-    fn field(label: &str, child: impl IntoElement, cx: &App) -> impl IntoElement {
-        h_flex()
-            .gap_3()
-            .items_center()
-            .child(
-                div()
-                    .w(px(110.))
-                    .flex_shrink_0()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(label.to_owned()),
-            )
-            .child(div().flex_1().child(child))
-    }
-
-    fn result_line(result: &Option<Result<String, String>>, cx: &App) -> Option<impl IntoElement> {
-        let result = result.as_ref()?;
-        let (color, text) = match result {
-            Ok(text) => (meter::up(), text.clone()),
-            Err(text) => (cx.theme().danger, text.clone()),
-        };
-        Some(
-            h_flex()
-                .gap_2()
-                .items_center()
-                .text_sm()
-                .child(status_dot(color))
-                .child(div().text_color(color).child(text)),
-        )
+    /// Push buttons under a group, aligned right like a macOS form's.
+    fn actions() -> Div {
+        h_flex().pt(px(10.)).gap_2().justify_end()
     }
 
     fn account_section(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let account = self.state.read(cx).account.clone();
         let services = self.services(cx);
         let signed_in = entitlement::Account::has_session(&services);
-        let (color, headline) = match &account.status {
+        let theme = cx.theme().clone();
+        let (color, title, detail) = match &account.status {
             Status::DevBuild => (
                 meter::up(),
-                "Developer build: every feature is unlocked, no account needed.".to_owned(),
+                "Developer build".to_owned(),
+                "Every feature is unlocked; no account needed.".to_owned(),
             ),
             Status::Active { plan, expires_at, .. } => (
                 meter::up(),
+                format!("{} plan", capitalize(plan)),
                 format!(
-                    "Active · {} plan · works offline for {} more days",
-                    capitalize(plan),
+                    "Active · works offline for {} more days",
                     ((*expires_at - crate::rank_check::now()) / 86_400).max(0)
                 ),
             ),
             Status::Expired { plan } => (
-                cx.theme().warning,
-                format!(
-                    "Your {} licence needs a refresh. Connect to the internet and refresh.",
-                    capitalize(plan)
-                ),
+                theme.warning,
+                format!("{} plan", capitalize(plan)),
+                "Needs a refresh. Connect to the internet and refresh the licence.".to_owned(),
             ),
-            Status::NotActivated => (cx.theme().muted_foreground, "Not activated on this Mac.".to_owned()),
-            Status::Invalid(reason) => (cx.theme().danger, format!("Licence problem: {reason}")),
+            Status::NotActivated => (
+                theme.muted_foreground,
+                "Not signed in".to_owned(),
+                "Sign in to activate AppDoctor on this computer.".to_owned(),
+            ),
+            Status::Invalid(reason) => (theme.danger, "Licence problem".to_owned(), reason.clone()),
         };
 
-        self.section(
-            "AppDoctor account",
-            "Sign in to activate signed builds and updates. Only your device ID, device name and app version are sent; keywords and ranks never leave this Mac.",
-            cx,
-        )
-        .child(
-            h_flex()
-                .gap_2()
-                .items_center()
-                .text_sm()
-                .child(status_dot(color))
-                .child(headline),
-        )
-        .when_some(account.pending.clone(), |this, code| {
-            this.child(
-                h_flex()
-                    .gap_4()
+        let buttons = h_flex()
+            .gap_2()
+            .flex_shrink_0()
+            .when(!matches!(account.status, Status::DevBuild) && !signed_in, |this| {
+                this.child(
+                    Button::new("sign-in")
+                        .small()
+                        .primary()
+                        .label("Sign In…")
+                        .loading(account.busy)
+                        .disabled(account.busy)
+                        .on_click(cx.listener(|this, _, window, cx| this.sign_in(window, cx))),
+                )
+            })
+            .when(!matches!(account.status, Status::DevBuild) && signed_in, |this| {
+                this.child(
+                    Button::new("sign-out")
+                        .small()
+                        .ghost()
+                        .label("Sign Out")
+                        .on_click(cx.listener(|this, _, window, cx| this.sign_out(window, cx))),
+                )
+                .child(
+                    Button::new("refresh-licence")
+                        .small()
+                        .label("Refresh")
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            let task = this.state.update(cx, |state, cx| state.refresh_entitlement(cx));
+                            cx.spawn_in(window, async move |_, cx| {
+                                if let Err(error) = task.await {
+                                    cx.update(|window, cx| {
+                                        window.push_notification(Notification::error(format!("{error:#}")), cx)
+                                    })
+                                    .ok();
+                                }
+                            })
+                            .detach();
+                        })),
+                )
+            });
+
+        let status = h_flex()
+            .px(px(10.))
+            .py(px(10.))
+            .gap(px(10.))
+            .items_center()
+            .child(
+                div()
+                    .size(px(32.))
+                    .flex_shrink_0()
+                    .rounded(px(8.))
+                    .bg(theme.primary)
+                    .flex()
                     .items_center()
-                    .p_3()
-                    .rounded(cx.theme().radius)
-                    .bg(cx.theme().muted.opacity(0.5))
+                    .justify_center()
+                    .child(
+                        Icon::new(gpui_kit::assets::IconName::Stethoscope)
+                            .size(px(17.))
+                            .text_color(theme.primary_foreground),
+                    ),
+            )
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .gap(px(2.))
                     .child(
                         div()
-                            .text_2xl()
-                            .font_family(cx.theme().mono_font_family.clone())
+                            .text_size(px(13.))
+                            .font_weight(FontWeight::MEDIUM)
+                            .child(title),
+                    )
+                    .child(
+                        h_flex()
+                            .gap(px(6.))
+                            .items_center()
+                            .text_size(px(12.))
+                            .text_color(theme.muted_foreground)
+                            .child(status_dot(color))
+                            .child(div().min_w_0().truncate().child(detail)),
+                    ),
+            )
+            .child(buttons);
+
+        let mut items = vec![status.into_any_element()];
+        if let Some(code) = account.pending.clone() {
+            let url = code.browser_url().to_owned();
+            items.push(
+                h_flex()
+                    .px(px(10.))
+                    .py(px(12.))
+                    .gap(px(14.))
+                    .items_center()
+                    .child(
+                        div()
+                            .text_size(px(24.))
+                            .font_family(theme.mono_font_family.clone())
                             .font_weight(FontWeight::BOLD)
                             .child(code.user_code.clone()),
                     )
                     .child(
                         v_flex()
-                            .gap_1()
-                            .text_sm()
+                            .flex_1()
+                            .min_w_0()
+                            .gap(px(2.))
+                            .text_size(px(12.))
                             .child("Confirm this code in your browser to finish signing in.")
                             .child(
                                 div()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
+                                    .truncate()
+                                    .text_color(theme.muted_foreground)
                                     .child(code.verification_uri.clone()),
                             ),
                     )
-                    .child(div().flex_1())
-                    .child(Button::new("reopen-browser").small().outline().label("Open browser").on_click({
-                        let url = code.browser_url().to_owned();
-                        move |_, _, cx| cx.open_url(&url)
-                    })),
-            )
-        })
-        .when_some(account.error.clone(), |this, error| {
-            this.child(div().text_sm().text_color(cx.theme().danger).child(error))
-        })
-        .when(!matches!(account.status, Status::DevBuild), |this| {
-            this.child(
+                    .child(
+                        Button::new("reopen-browser")
+                            .small()
+                            .label("Open Browser")
+                            .on_click(move |_, _, cx| cx.open_url(&url)),
+                    )
+                    .into_any_element(),
+            );
+        }
+        items.push(
+            controls::row(
+                "API server",
                 h_flex()
                     .gap_2()
-                    .when(!signed_in, |this| {
-                        this.child(
-                            Button::new("sign-in")
-                                .small()
-                                .primary()
-                                .icon(IconName::User)
-                                .label("Sign in")
-                                .loading(account.busy)
-                                .disabled(account.busy)
-                                .on_click(cx.listener(|this, _, window, cx| this.sign_in(window, cx))),
-                        )
-                    })
-                    .when(signed_in, |this| {
-                        this.child(
-                            Button::new("refresh-licence")
-                                .small()
-                                .outline()
-                                .icon(IconName::RefreshCw)
-                                .label("Refresh licence")
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    let task = this.state.update(cx, |state, cx| state.refresh_entitlement(cx));
-                                    cx.spawn_in(window, async move |_, cx| {
-                                        if let Err(error) = task.await {
-                                            cx.update(|window, cx| {
-                                                window.push_notification(Notification::error(format!("{error:#}")), cx)
-                                            })
-                                            .ok();
-                                        }
-                                    })
-                                    .detach();
-                                })),
-                        )
-                        .child(
-                            Button::new("sign-out")
-                                .small()
-                                .ghost()
-                                .label("Sign out")
-                                .on_click(cx.listener(|this, _, window, cx| this.sign_out(window, cx))),
-                        )
-                    }),
+                    .child(controls::text_field(&self.api_base, cx).w(px(FIELD - 64.)))
+                    .child(
+                        Button::new("save-api")
+                            .small()
+                            .label("Save")
+                            .on_click(cx.listener(|this, _, window, cx| this.save_api_base(window, cx))),
+                    ),
+                cx,
             )
-        })
-        .child(Self::field(
-            "API server",
-            h_flex().gap_2().child(div().flex_1().child(Input::new(&self.api_base).small())).child(
-                Button::new("save-api")
-                    .small()
-                    .outline()
-                    .label("Save")
-                    .on_click(cx.listener(|this, _, window, cx| this.save_api_base(window, cx))),
-            ),
-            cx,
-        ))
+            .into_any_element(),
+        );
+
+        Self::section("Account", controls::rows(items, cx), cx)
+            .when_some(account.error.clone(), |this, error| {
+                this.child(div().pt(px(8.)).child(controls::banner(&Err(error), cx)))
+            })
+            .child(controls::footnote(
+                "Signing in activates signed builds and updates. Only your device ID, device name and app version are sent; keywords and ranks never leave this computer.",
+                cx,
+            ))
     }
 
     fn asc_section(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let muted = cx.theme().muted_foreground;
         let file_label = match (&self.asc_file, &self.asc_saved) {
             (Some((name, _)), _) => name.clone(),
-            (None, Some(_)) => "Stored in the keychain".to_owned(),
-            (None, None) => "No key chosen".to_owned(),
+            (None, Some(_)) => "In the keychain".to_owned(),
+            (None, None) => "None chosen".to_owned(),
         };
-        self.section(
-            "App Store Connect",
-            "Lets AppDoctor read and write your app's name, subtitle, keywords and description, and submit versions to App Review after you confirm a summary. Create a key under Users and Access → Integrations → App Store Connect API (App Manager role).",
-            cx,
-        )
-        .when_some(self.asc_saved.clone(), |this, (_, key_id)| {
-            this.child(
+        let mut items = Vec::new();
+        if let Some((_, key_id)) = &self.asc_saved {
+            items.push(
+                controls::row(
+                    "Status",
+                    h_flex()
+                        .gap(px(6.))
+                        .items_center()
+                        .text_size(px(13.))
+                        .text_color(muted)
+                        .child(status_dot(meter::up()))
+                        .child(format!("Key {key_id} saved")),
+                    cx,
+                )
+                .into_any_element(),
+            );
+        }
+        items.push(
+            controls::row(
+                "Issuer ID",
+                controls::text_field(&self.asc_issuer, cx).w(px(FIELD)),
+                cx,
+            )
+            .into_any_element(),
+        );
+        items.push(controls::row("Key ID", controls::text_field(&self.asc_key_id, cx).w(px(FIELD)), cx).into_any_element());
+        items.push(
+            controls::row(
+                "Private key",
                 h_flex()
                     .gap_2()
                     .items_center()
-                    .text_sm()
-                    .child(status_dot(meter::up()))
-                    .child(format!("Key {key_id} saved in the keychain")),
-            )
-        })
-        .child(Self::field("Issuer ID", Input::new(&self.asc_issuer).small(), cx))
-        .child(Self::field("Key ID", Input::new(&self.asc_key_id).small(), cx))
-        .child(Self::field(
-            "Private key",
-            h_flex()
-                .gap_3()
-                .items_center()
-                .child(
-                    Button::new("choose-p8")
-                        .small()
-                        .outline()
-                        .icon(IconName::FolderOpen)
-                        .label("Choose .p8 file…")
-                        .on_click(cx.listener(|this, _, window, cx| this.choose_p8(window, cx))),
-                )
-                .child(div().text_sm().text_color(cx.theme().muted_foreground).child(file_label)),
-            cx,
-        ))
-        .child(
-            h_flex()
-                .gap_2()
-                .child(
-                    Button::new("save-asc")
-                        .small()
-                        .primary()
-                        .label("Save to keychain")
-                        .on_click(cx.listener(|this, _, window, cx| this.save_asc(window, cx))),
-                )
-                .when(self.asc_saved.is_some(), |this| {
-                    this.child(
-                        Button::new("test-asc")
-                            .small()
-                            .outline()
-                            .label("Test connection")
-                            .loading(self.asc_busy)
-                            .disabled(self.asc_busy)
-                            .on_click(cx.listener(|this, _, window, cx| this.test_asc(window, cx))),
+                    .min_w_0()
+                    .child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(px(13.))
+                            .text_color(muted)
+                            .child(file_label),
                     )
                     .child(
-                        Button::new("remove-asc")
+                        Button::new("choose-p8")
                             .small()
-                            .ghost()
-                            .label("Remove")
-                            .on_click(cx.listener(|this, _, window, cx| this.remove_asc(window, cx))),
-                    )
-                }),
-        )
-        .when_some(Self::result_line(&self.asc_result, cx), |this, line| this.child(line))
+                            .label("Choose…")
+                            .on_click(cx.listener(|this, _, window, cx| this.choose_p8(window, cx))),
+                    ),
+                cx,
+            )
+            .into_any_element(),
+        );
+
+        Self::section("App Store Connect", controls::rows(items, cx), cx)
+            .child(
+                Self::actions()
+                    .when(self.asc_saved.is_some(), |this| {
+                        this.child(
+                            Button::new("remove-asc")
+                                .small()
+                                .ghost()
+                                .label("Remove")
+                                .on_click(cx.listener(|this, _, window, cx| this.remove_asc(window, cx))),
+                        )
+                        .child(
+                            Button::new("test-asc")
+                                .small()
+                                .label("Test Connection")
+                                .loading(self.asc_busy)
+                                .disabled(self.asc_busy)
+                                .on_click(cx.listener(|this, _, window, cx| this.test_asc(window, cx))),
+                        )
+                    })
+                    .child(
+                        Button::new("save-asc")
+                            .small()
+                            .primary()
+                            .label("Save to Keychain")
+                            .on_click(cx.listener(|this, _, window, cx| this.save_asc(window, cx))),
+                    ),
+            )
+            .when_some(self.asc_result.as_ref(), |this, result| {
+                this.child(div().pt(px(8.)).child(controls::banner(result, cx)))
+            })
+            .child(controls::footnote(
+                "Lets AppDoctor read and write your app's name, subtitle, keywords and description, and submit versions to App Review after you confirm a summary. Create a key in App Store Connect under Users and Access → Integrations → App Store Connect API, with the App Manager role.",
+                cx,
+            ))
     }
 
     fn ads_section(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let muted = cx.theme().muted_foreground;
-        let section = self.section(
-            "Apple Ads",
-            "Adds Apple's search popularity (0–100) to your keywords. AppDoctor makes the key pair; the private key stays in your keychain.",
-            cx,
-        );
+        let theme = cx.theme().clone();
         let Some(public_pem) = self.ads_public_pem.clone() else {
-            return section.child(
-                h_flex().child(
-                    Button::new("generate-ads-key")
-                        .small()
-                        .primary()
-                        .icon(IconName::Plus)
-                        .label("Generate key pair")
-                        .on_click(cx.listener(|this, _, window, cx| this.generate_ads_key(window, cx))),
+            return Self::section(
+                "Apple Ads",
+                controls::rows(
+                    [controls::row(
+                        "Key pair",
+                        Button::new("generate-ads-key")
+                            .small()
+                            .label("Generate…")
+                            .on_click(cx.listener(|this, _, window, cx| this.generate_ads_key(window, cx))),
+                        cx,
+                    )
+                    .into_any_element()],
+                    cx,
                 ),
-            );
+                cx,
+            )
+            .child(controls::footnote(
+                "Adds Apple's search popularity (0–100) to your keywords. AppDoctor makes a key pair for you; the private key stays in your keychain.",
+                cx,
+            ));
         };
         let complete = self.ads_key.as_ref().is_some_and(AppleAdsKey::is_complete);
-        section
-            .child(
-                div()
-                    .text_sm()
-                    .child("1. Copy this public key. 2. In Apple Ads, open Account Settings → API and paste it. 3. Enter the clientId, teamId and keyId Apple shows you."),
-            )
-            .child(
+        let id_row = |name: &'static str, input: &Entity<InputState>, cx: &App| {
+            controls::row(name, controls::text_field(input, cx).w(px(FIELD)), cx).into_any_element()
+        };
+        let items = vec![
+            controls::stacked(
+                "Public key",
+                None,
                 h_flex()
-                    .gap_3()
+                    .gap_2()
                     .items_start()
-                    .p_3()
-                    .rounded(cx.theme().radius)
-                    .bg(cx.theme().muted.opacity(0.5))
+                    .p(px(8.))
+                    .rounded(px(7.))
+                    .bg(theme.foreground.opacity(0.06))
                     .child(
                         div()
                             .flex_1()
-                            .text_xs()
-                            .font_family(cx.theme().mono_font_family.clone())
-                            .text_color(muted)
+                            .min_w_0()
+                            .text_size(px(11.))
+                            .line_height(px(15.))
+                            .font_family(theme.mono_font_family.clone())
+                            .text_color(theme.muted_foreground)
                             .child(public_pem.clone()),
                     )
                     .child(Clipboard::new("copy-ads-public-key").value(public_pem).tooltip("Copy public key")),
+                cx,
             )
-            .child(Self::field("clientId", Input::new(&self.ads_client_id).small(), cx))
-            .child(Self::field("teamId", Input::new(&self.ads_team_id).small(), cx))
-            .child(Self::field("keyId", Input::new(&self.ads_key_id).small(), cx))
+            .into_any_element(),
+            id_row("clientId", &self.ads_client_id, cx),
+            id_row("teamId", &self.ads_team_id, cx),
+            id_row("keyId", &self.ads_key_id, cx),
+        ];
+
+        Self::section("Apple Ads", controls::rows(items, cx), cx)
             .child(
-                h_flex()
-                    .gap_2()
+                Self::actions()
                     .child(
-                        Button::new("save-ads")
+                        Button::new("remove-ads")
                             .small()
-                            .primary()
-                            .label("Save to keychain")
-                            .on_click(cx.listener(|this, _, window, cx| this.save_ads(window, cx))),
+                            .ghost()
+                            .label("Remove Key")
+                            .on_click(cx.listener(|this, _, window, cx| this.remove_ads(window, cx))),
                     )
                     .when(complete, |this| {
                         this.child(
                             Button::new("test-ads")
                                 .small()
-                                .outline()
-                                .label("Test connection")
+                                .label("Test Connection")
                                 .loading(self.ads_busy)
                                 .disabled(self.ads_busy)
                                 .on_click(cx.listener(|this, _, window, cx| this.test_ads(window, cx))),
                         )
                     })
                     .child(
-                        Button::new("remove-ads")
+                        Button::new("save-ads")
                             .small()
-                            .ghost()
-                            .label("Remove key")
-                            .on_click(cx.listener(|this, _, window, cx| this.remove_ads(window, cx))),
+                            .primary()
+                            .label("Save to Keychain")
+                            .on_click(cx.listener(|this, _, window, cx| this.save_ads(window, cx))),
                     ),
             )
-            .when_some(Self::result_line(&self.ads_result, cx), |this, line| this.child(line))
+            .when_some(self.ads_result.as_ref(), |this, result| {
+                this.child(div().pt(px(8.)).child(controls::banner(result, cx)))
+            })
+            .child(controls::footnote(
+                "Adds Apple's search popularity (0–100) to your keywords. Copy the public key into Apple Ads under Account Settings → API, then enter the clientId, teamId and keyId it shows you. The private key stays in your keychain.",
+                cx,
+            ))
     }
 
     fn about_section(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme().clone();
         let state = self.state.read(cx);
         let data_dir = state.services.data_dir.clone();
         let (color, update) = match &state.update {
-            UpdateStatus::Unknown | UpdateStatus::Checking => {
-                (cx.theme().muted_foreground, "Checking for updates…".to_owned())
-            }
-            UpdateStatus::Current => (meter::up(), "You're up to date.".to_owned()),
-            UpdateStatus::Available(info) => (cx.theme().primary, format!("AppDoctor {} is available.", info.version)),
-            UpdateStatus::Failed(_) => (
-                cx.theme().muted_foreground,
-                "Couldn't reach the update server.".to_owned(),
-            ),
+            UpdateStatus::Unknown | UpdateStatus::Checking => (theme.muted_foreground, "Checking…".to_owned()),
+            UpdateStatus::Current => (meter::up(), "Up to date".to_owned()),
+            UpdateStatus::Available(info) => (theme.primary, format!("{} is available", info.version)),
+            UpdateStatus::Failed(_) => (theme.muted_foreground, "Couldn't reach the update server".to_owned()),
         };
-        self.section(
-            "About",
-            "Your apps, keywords and rank history are stored in one SQLite file on this Mac. AppDoctor sends no analytics.",
+        let secondary = |text: String| {
+            div()
+                .min_w_0()
+                .truncate()
+                .text_size(px(13.))
+                .text_color(theme.muted_foreground)
+                .child(text)
+        };
+        let items = vec![
+            controls::row("Version", secondary(env!("CARGO_PKG_VERSION").to_owned()), cx).into_any_element(),
+            controls::row(
+                "Updates",
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .child(status_dot(color))
+                    .child(secondary(update))
+                    .child(
+                        Button::new("check-update")
+                            .small()
+                            .label("Check Now")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.state.update(cx, |state, cx| state.check_for_update(cx))
+                            })),
+                    ),
+                cx,
+            )
+            .into_any_element(),
+            controls::row(
+                "Data folder",
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .min_w_0()
+                    .max_w(px(FIELD + 40.))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(px(12.))
+                            .font_family(theme.mono_font_family.clone())
+                            .text_color(theme.muted_foreground)
+                            .child(data_dir.display().to_string()),
+                    )
+                    .child(
+                        Button::new("reveal-data")
+                            .small()
+                            .label("Show")
+                            .on_click(move |_, _, cx| cx.reveal_path(&data_dir.join("appdoctor.db"))),
+                    ),
+                cx,
+            )
+            .into_any_element(),
+        ];
+        Self::section("About", controls::rows(items, cx), cx).child(controls::footnote(
+            "Your apps, keywords and rank history are stored in one SQLite file on this computer. AppDoctor sends no analytics.",
             cx,
-        )
-        .child(
-            h_flex()
-                .gap_2()
-                .items_center()
-                .text_sm()
-                .child(pill(format!("Version {}", env!("CARGO_PKG_VERSION")), cx.theme().muted_foreground))
-                .child(status_dot(color))
-                .child(update)
-                .child(div().flex_1())
-                .child(
-                    Button::new("check-update")
-                        .small()
-                        .outline()
-                        .label("Check for updates")
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.state.update(cx, |state, cx| state.check_for_update(cx))
-                        })),
-                ),
-        )
-        .child(
-            h_flex()
-                .gap_2()
-                .items_center()
-                .text_sm()
-                .child(div().text_color(cx.theme().muted_foreground).child("Data folder"))
-                .child(div().flex_1().truncate().font_family(cx.theme().mono_font_family.clone()).text_xs().child(data_dir.display().to_string()))
-                .child(Button::new("reveal-data").small().ghost().label("Show").on_click(move |_, _, cx| {
-                    cx.reveal_path(&data_dir.join("appdoctor.db"))
-                })),
-        )
+        ))
     }
 }
+
+/// The widest a settings page grows, and the width of its text fields.
+const COLUMN: f32 = 640.;
+const FIELD: f32 = 300.;
 
 fn capitalize(text: &str) -> String {
     let mut chars = text.chars();
@@ -784,20 +855,25 @@ fn capitalize(text: &str) -> String {
 
 impl Render for SettingsView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        v_flex()
-            .id("settings-page")
-            .size_full()
-            .overflow_y_scroll()
-            .p_6()
-            .gap_5()
-            .child(widgets::page_header(
-                "Settings",
-                "Connections and your account. Secrets are kept in the system keychain.",
-                cx,
-            ))
-            .child(self.account_section(cx))
-            .child(self.asc_section(cx))
-            .child(self.ads_section(cx))
-            .child(self.about_section(cx))
+        div().id("settings-page").size_full().overflow_y_scroll().child(
+            h_flex().w_full().justify_center().child(
+                v_flex()
+                    .w_full()
+                    .max_w(px(COLUMN))
+                    .px_6()
+                    .pt(px(28.))
+                    .pb(px(40.))
+                    .gap(px(28.))
+                    .child(widgets::page_header(
+                        "Settings",
+                        "Connections and your account. Secrets are kept in the system keychain.",
+                        cx,
+                    ))
+                    .child(self.account_section(cx))
+                    .child(self.asc_section(cx))
+                    .child(self.ads_section(cx))
+                    .child(self.about_section(cx)),
+            ),
+        )
     }
 }
