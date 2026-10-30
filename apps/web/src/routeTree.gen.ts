@@ -11,6 +11,8 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AccountRouteImport } from './routes/account'
+import { Route as AsoKeywordResearchRouteImport } from './routes/aso-keyword-research'
+import { Route as AsoKeywordResearchToolsRouteImport } from './routes/aso-keyword-research-tools'
 import { Route as DeviceRouteImport } from './routes/device'
 import { Route as DownloadRouteImport } from './routes/download'
 import { Route as LoginRouteImport } from './routes/login'
@@ -29,6 +31,16 @@ const IndexRoute = IndexRouteImport.update({
 const AccountRoute = AccountRouteImport.update({
   id: '/account',
   path: '/account',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AsoKeywordResearchRoute = AsoKeywordResearchRouteImport.update({
+  id: '/aso-keyword-research',
+  path: '/aso-keyword-research',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AsoKeywordResearchToolsRoute = AsoKeywordResearchToolsRouteImport.update({
+  id: '/aso-keyword-research-tools',
+  path: '/aso-keyword-research-tools',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DeviceRoute = DeviceRouteImport.update({
@@ -80,6 +92,8 @@ const DocsSlugRoute = DocsSlugRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/account': typeof AccountRoute
+  '/aso-keyword-research': typeof AsoKeywordResearchRoute
+  '/aso-keyword-research-tools': typeof AsoKeywordResearchToolsRoute
   '/device': typeof DeviceRoute
   '/download': typeof DownloadRoute
   '/login': typeof LoginRoute
@@ -93,6 +107,8 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/account': typeof AccountRoute
+  '/aso-keyword-research': typeof AsoKeywordResearchRoute
+  '/aso-keyword-research-tools': typeof AsoKeywordResearchToolsRoute
   '/device': typeof DeviceRoute
   '/download': typeof DownloadRoute
   '/login': typeof LoginRoute
@@ -107,6 +123,8 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/account': typeof AccountRoute
+  '/aso-keyword-research': typeof AsoKeywordResearchRoute
+  '/aso-keyword-research-tools': typeof AsoKeywordResearchToolsRoute
   '/device': typeof DeviceRoute
   '/download': typeof DownloadRoute
   '/login': typeof LoginRoute
@@ -122,6 +140,8 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/account'
+    | '/aso-keyword-research'
+    | '/aso-keyword-research-tools'
     | '/device'
     | '/download'
     | '/login'
@@ -135,6 +155,8 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/account'
+    | '/aso-keyword-research'
+    | '/aso-keyword-research-tools'
     | '/device'
     | '/download'
     | '/login'
@@ -148,6 +170,8 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/account'
+    | '/aso-keyword-research'
+    | '/aso-keyword-research-tools'
     | '/device'
     | '/download'
     | '/login'
@@ -162,6 +186,8 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AccountRoute: typeof AccountRoute
+  AsoKeywordResearchRoute: typeof AsoKeywordResearchRoute
+  AsoKeywordResearchToolsRoute: typeof AsoKeywordResearchToolsRoute
   DeviceRoute: typeof DeviceRoute
   DownloadRoute: typeof DownloadRoute
   LoginRoute: typeof LoginRoute
@@ -187,6 +213,20 @@ declare module '@tanstack/react-router' {
       path: '/account'
       fullPath: '/account'
       preLoaderRoute: typeof AccountRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/aso-keyword-research': {
+      id: '/aso-keyword-research'
+      path: '/aso-keyword-research'
+      fullPath: '/aso-keyword-research'
+      preLoaderRoute: typeof AsoKeywordResearchRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/aso-keyword-research-tools': {
+      id: '/aso-keyword-research-tools'
+      path: '/aso-keyword-research-tools'
+      fullPath: '/aso-keyword-research-tools'
+      preLoaderRoute: typeof AsoKeywordResearchToolsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/device': {
@@ -258,6 +298,8 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AccountRoute: AccountRoute,
+  AsoKeywordResearchRoute: AsoKeywordResearchRoute,
+  AsoKeywordResearchToolsRoute: AsoKeywordResearchToolsRoute,
   DeviceRoute: DeviceRoute,
   DownloadRoute: DownloadRoute,
   LoginRoute: LoginRoute,

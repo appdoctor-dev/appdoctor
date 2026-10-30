@@ -43,9 +43,20 @@ export function SiteFooter() {
     <footer className="border-t border-line">
       <div className="mx-auto grid max-w-6xl gap-8 px-4 py-10 text-sm text-ink-soft sm:grid-cols-[2fr_1fr_1fr] sm:px-6">
         <p className="max-w-sm">
-          {SITE.name} is an open-source ASO tool for Mac and Windows. Your keywords and rankings stay on your computer.
+          {SITE.name} is an open-source ASO keyword research tool for Mac and Windows. Your keywords and rankings stay on
+          your computer.
         </p>
         <ul className="flex flex-col gap-2">
+          <li>
+            <Link to="/aso-keyword-research" className="hover:text-ink">
+              ASO keyword research
+            </Link>
+          </li>
+          <li>
+            <Link to="/aso-keyword-research-tools" className="hover:text-ink">
+              ASO keyword research tools
+            </Link>
+          </li>
           <li>
             <Link to="/pricing" className="hover:text-ink">
               Pricing

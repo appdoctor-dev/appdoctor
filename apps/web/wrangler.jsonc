@@ -7,13 +7,16 @@
 	"observability": { "enabled": true },
 	"vars": {
 		"SITE_URL": "http://localhost:3000",
-		"API_URL": "http://localhost:8787"
+		"API_URL": "http://localhost:8787",
+		// Public by design: IndexNow checks /{key}.txt on the site to accept pings.
+		"INDEXNOW_KEY": "8bef909a8fe2f7cfe1922e0d13a69266"
 	},
 	"env": {
 		"production": {
 			"vars": {
 				"SITE_URL": "https://appdoctor.so",
-				"API_URL": "https://api.appdoctor.so"
+				"API_URL": "https://api.appdoctor.so",
+				"INDEXNOW_KEY": "8bef909a8fe2f7cfe1922e0d13a69266"
 			},
 			// Server-side reads (pricing, downloads) go straight to the API worker.
 			"services": [{ "binding": "API", "service": "appdoctor-api-production" }],

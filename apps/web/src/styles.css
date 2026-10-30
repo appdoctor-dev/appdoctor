@@ -14,6 +14,20 @@
   --color-up: #138a5b;
   --color-down: #d9534f;
   --color-tint: #e3f1ea;
+
+  /* The redrawn app: the desktop app's own dark window and system font, so
+     it reads as software, not as a picture of it. */
+  --font-system: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "Helvetica Neue", sans-serif;
+  --color-app-window: #1d1d20;
+  --color-app-side: #252529;
+  --color-app-line: #34343b;
+  --color-app-text: #ececf1;
+  --color-app-muted: #9696a3;
+  --color-app-accent: #5d5ce6;
+  --color-app-accent-soft: #9d9cff;
+  --color-app-up: #34c77b;
+  --color-app-down: #ff6b6b;
+  --color-app-warn: #f2b84b;
 }
 
 @layer base {
@@ -55,4 +69,31 @@
   @apply prose prose-slate max-w-none prose-headings:font-semibold prose-headings:tracking-tight prose-a:text-ink prose-a:underline-offset-4 prose-code:before:content-none prose-code:after:content-none prose-pre:bg-ink;
   --tw-prose-body: var(--color-ink);
   --tw-prose-headings: var(--color-ink);
+}
+
+/* Long-form guides: readable measure, tables that fit the page. */
+.guide {
+  @apply text-[17px] leading-[1.65] text-ink;
+}
+.guide h2 {
+  @apply mt-14 mb-4 scroll-mt-24 text-[1.65rem] leading-tight font-bold tracking-tight;
+}
+.guide p {
+  @apply my-4 max-w-[68ch];
+}
+.guide table {
+  @apply my-6 w-full border-collapse text-left text-[15px];
+}
+.guide caption {
+  @apply pb-2 text-left text-sm text-ink-soft;
+}
+.guide th,
+.guide td {
+  @apply border-b border-line py-2.5 pr-4 align-top;
+}
+.guide thead th {
+  @apply text-sm font-semibold text-ink-soft;
+}
+.guide tbody th {
+  @apply font-semibold;
 }

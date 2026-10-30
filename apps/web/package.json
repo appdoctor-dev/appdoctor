@@ -11,6 +11,7 @@
     "preview": "npm run build && vite preview",
     "deploy": "CLOUDFLARE_ENV=production vite build && wrangler deploy",
     "cf-typegen": "wrangler types",
+    "indexnow": "node scripts/indexnow.mjs",
     "check-types": "tsr generate && tsc --noEmit"
   },
   "dependencies": {
