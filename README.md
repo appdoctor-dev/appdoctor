@@ -132,7 +132,7 @@ Locally the admin dev server also runs the API inside it (so its private `API` b
 5. Cloudflare Access (Zero Trust) protects the admin. The Access application "AppDoctor admin" for `admin.appdoctor.so` uses the reusable "Owner" policy. Its team domain and AUD tag are in `apps/admin/wrangler.jsonc`, and the admin Worker verifies the Access token on every request (it refuses requests without one). The admin has no workers.dev or preview URL, so Access can't be bypassed. The API's admin routes aren't on the internet at all: the admin reaches them through a private service binding (`AdminEntrypoint`).
 
 6. In Stripe (live mode):
-   - Add a webhook endpoint at `https://api.appdoctor.so/api/auth/stripe/webhook`. Subscribe it to `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `charge.refunded`, `charge.dispute.created` and `radar.early_fraud_warning.created`.
+   - Add a webhook endpoint at `https://api.appdoctor.so/auth/stripe/webhook`. Subscribe it to `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `charge.refunded`, `charge.dispute.created` and `radar.early_fraud_warning.created`.
    - Configure the [Customer Portal](https://dashboard.stripe.com/settings/billing/portal) so subscribers can cancel and update their card.
 
 ### Sales tax and VAT

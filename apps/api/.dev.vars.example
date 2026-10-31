@@ -7,7 +7,7 @@ BETTER_AUTH_SECRET=
 # Products, Prices, Customers, Checkout Sessions, Customer Portal and Subscriptions,
 # and read access to Charges, Invoices and Invoice Payments.
 STRIPE_SECRET_KEY=
-# From `stripe listen --forward-to localhost:8787/api/auth/stripe/webhook`
+# From `stripe listen --forward-to localhost:8787/auth/stripe/webhook`
 STRIPE_WEBHOOK_SECRET=
 
 # npm run keys:generate -w @repo/api

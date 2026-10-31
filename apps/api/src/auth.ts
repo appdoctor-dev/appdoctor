@@ -33,10 +33,28 @@ export async function loadStripePlans(db: Db) {
     }));
 }
 
+/**
+ * The link in the sign-in email: the app's sign-in page, which redeems the
+ * token and goes on to where the person was headed (the callbackURL the
+ * page asked for), rather than a raw API address.
+ */
+function signInLink(env: Bindings, verifyUrl: string, token: string) {
+  const app = env.APP_URL ?? env.WEB_URL;
+  const link = new URL("/login", app);
+  link.searchParams.set("token", token);
+  const callback = new URL(verifyUrl).searchParams.get("callbackURL");
+  const target = callback ? new URL(callback, app) : null;
+  if (target && target.origin === new URL(app).origin && target.pathname !== "/account") {
+    link.searchParams.set("redirect", target.pathname + target.search);
+  }
+  return link.toString();
+}
+
 export function createAuth(env: Bindings, db: Db, stripeClient: Stripe = createStripe(env)) {
   return betterAuth({
     appName: "AppDoctor",
     baseURL: env.API_URL,
+    basePath: "/auth",
     secret: env.BETTER_AUTH_SECRET,
     trustedOrigins: [env.WEB_URL, ...(env.APP_URL ? [env.APP_URL] : [])],
     database: drizzleAdapter(db, { provider: "sqlite", schema }),
@@ -50,11 +68,11 @@ export function createAuth(env: Bindings, db: Db, stripeClient: Stripe = createS
     plugins: [
       // Passwordless: people buying a desktop app should not have to invent a password.
       magicLink({
-        sendMagicLink: async ({ email, url }) => {
+        sendMagicLink: async ({ email, url, token }) => {
           await sendEmail(env, {
             to: email,
             subject: "Your AppDoctor sign-in link",
-            text: `Sign in to AppDoctor:\n\n${url}\n\nThis link expires in 5 minutes. If you didn't ask for it, ignore this email.`,
+            text: `Sign in to AppDoctor:\n\n${signInLink(env, url, token)}\n\nThis link expires in 5 minutes. If you didn't ask for it, ignore this email.`,
           });
         },
       }),

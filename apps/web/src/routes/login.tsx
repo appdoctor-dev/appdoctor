@@ -1,26 +1,44 @@
 import { createFileRoute } from "@tanstack/react-router"
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { buttonClass } from "#/components/chrome"
 import { authClient } from "#/lib/auth"
 
-type Search = { redirect?: string }
+type Search = { redirect?: string; token?: string }
 
 export const Route = createFileRoute("/login")({
   ssr: false,
   validateSearch: (search: Record<string, unknown>): Search => ({
     // Only same-site paths, so the link can't bounce someone to another site after sign-in.
     redirect: typeof search.redirect === "string" && search.redirect.startsWith("/") && !search.redirect.startsWith("//") ? search.redirect : undefined,
+    // From the link in the sign-in email.
+    token: typeof search.token === "string" ? search.token : undefined,
   }),
   head: () => ({ meta: [{ title: "Sign in: AppDoctor" }, { name: "robots", content: "noindex" }] }),
   component: Login,
 })
 
 function Login() {
-  const { redirect = "/account" } = Route.useSearch()
+  const { redirect = "/account", token } = Route.useSearch()
   const [email, setEmail] = useState("")
-  const [state, setState] = useState<"idle" | "sending" | "sent">("idle")
+  const [state, setState] = useState<"idle" | "sending" | "sent" | "verifying">(token ? "verifying" : "idle")
   const [error, setError] = useState<string | null>(null)
   const callbackURL = `${window.location.origin}${redirect}`
+
+  // The emailed link lands here with its token: redeem it once (it only
+  // works once), then go on, replacing this URL so Back doesn't reuse it.
+  const redeemed = useRef(false)
+  useEffect(() => {
+    if (!token || redeemed.current) return
+    redeemed.current = true
+    authClient.magicLink.verify({ query: { token } }).then(({ error }) => {
+      if (error) {
+        setError("That sign-in link has expired or was already used. Send yourself a new one.")
+        setState("idle")
+      } else {
+        window.location.replace(redirect)
+      }
+    })
+  }, [token, redirect])
 
   async function sendLink(e: React.FormEvent) {
     e.preventDefault()
@@ -43,7 +61,11 @@ function Login() {
   return (
     <div className="mx-auto max-w-md px-4 py-20">
       <h1 className="text-3xl font-bold tracking-tight">Sign in to AppDoctor</h1>
-      {state === "sent" ? (
+      {state === "verifying" ? (
+        <p className="mt-3 text-ink-soft" aria-live="polite">
+          Signing you in…
+        </p>
+      ) : state === "sent" ? (
         <div className="mt-6 rounded-2xl border border-line bg-surface p-6">
           <p className="font-semibold">Check your email</p>
           <p className="mt-2 text-ink-soft">

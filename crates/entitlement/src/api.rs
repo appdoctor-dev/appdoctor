@@ -35,7 +35,7 @@ pub enum SignInError {
 
 pub type Result<T> = std::result::Result<T, SignInError>;
 
-/// What the user needs to finish signing in, from `POST /api/auth/device/code`.
+/// What the user needs to finish signing in, from `POST /auth/device/code`.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct DeviceCode {
     pub device_code: String,
@@ -150,7 +150,7 @@ impl ApiClient {
     pub async fn start_sign_in(&self) -> Result<DeviceCode> {
         let response = self
             .http
-            .post(format!("{}/api/auth/device/code", self.base))
+            .post(format!("{}/auth/device/code", self.base))
             .json(&serde_json::json!({"client_id": CLIENT_ID}))
             .send()
             .await?;
@@ -185,7 +185,7 @@ impl ApiClient {
     async fn poll_sign_in(&self, code: &DeviceCode) -> Result<Poll> {
         let response = self
             .http
-            .post(format!("{}/api/auth/device/token", self.base))
+            .post(format!("{}/auth/device/token", self.base))
             .json(&serde_json::json!({
                 "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
                 "device_code": code.device_code,

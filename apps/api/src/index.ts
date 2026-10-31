@@ -46,8 +46,15 @@ app.use(
 app.use("*", withContext);
 
 // Sign-in, sessions, device flow, Stripe checkout/portal and the Stripe webhook
-// (/api/auth/stripe/webhook) are all served by Better Auth.
-app.on(["GET", "POST"], "/api/auth/*", (c) => c.var.auth.handler(c.req.raw));
+// (/auth/stripe/webhook) are all served by Better Auth.
+app.on(["GET", "POST"], "/auth/*", (c) => c.var.auth.handler(c.req.raw));
+// The paths before Better Auth moved to /auth, which the 0.1.0 desktop app
+// and the first Stripe webhook still use.
+app.on(["GET", "POST"], "/api/auth/*", (c) => {
+  const url = new URL(c.req.url);
+  url.pathname = url.pathname.replace(/^\/api/, "");
+  return c.var.auth.handler(new Request(url, c.req.raw));
+});
 
 app.use(
   "/v1/*",
