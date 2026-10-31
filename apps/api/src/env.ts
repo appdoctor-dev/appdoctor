@@ -25,7 +25,8 @@ export type Bindings = {
   STRIPE_WEBHOOK_SECRET: string;
   /** Base64 PKCS#8 Ed25519 key; `npm run keys:generate -w @repo/api`. */
   LICENSE_SIGNING_KEY: string;
-  RESEND_API_KEY?: string;
+  /** Cloudflare Email Sending; production only (wrangler.jsonc). */
+  EMAIL?: SendEmail;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
 };

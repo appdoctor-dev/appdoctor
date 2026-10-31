@@ -90,7 +90,7 @@ npm run dev
 - Admin: http://localhost:3001
 - API: http://localhost:8787
 
-Without `RESEND_API_KEY`, sign-in links are printed in the API's console instead of emailed. Open the admin, go to **Pricing** and create your first plan; it appears on the website's pricing page straight away.
+Locally, sign-in links are printed in the API's console instead of emailed. Open the admin, go to **Pricing** and create your first plan; it appears on the website's pricing page straight away.
 
 Locally the admin dev server also runs the API inside it (so its private `API` binding works) and shares the API's local database.
 
@@ -105,6 +105,12 @@ Locally the admin dev server also runs the API inside it (so its private `API` b
 
    ```bash
    npx wrangler r2 bucket create appdoctor-releases
+   ```
+
+   Sign-in emails go out through Cloudflare Email Sending, with no API key. Turn it on for the domain once; it adds the SPF and DKIM records:
+
+   ```bash
+   npx wrangler email sending enable appdoctor.so
    ```
 
 3. Set the API's secrets (each one listed in `apps/api/.dev.vars.example`), from `apps/api`:

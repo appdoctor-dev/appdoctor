@@ -66,5 +66,5 @@ Marketing search terms: **aso tool**, **aso keyword research tools**.
 
 - Open-source license (AGPL-3.0 like Cap, or another)
 - Exactly what the paid build unlocks versus a source build
-- Email provider (Resend wired; Cloudflare Email is an alternative), Google OAuth app
+- Google OAuth app
 - Stripe Tax registrations before charging EU/US customers
