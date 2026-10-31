@@ -53,8 +53,10 @@
         <stop offset="1" stop-color="#22c48a"/>
       </linearGradient>
     </defs>
-    <path d="M262 192 C 300 156, 360 156, 398 192" fill="none" stroke="url(#arrow)" stroke-width="4" stroke-linecap="round" stroke-dasharray="1 10"/>
-    <path d="M383 175 L 400 194 L 376 199" fill="none" stroke="#22c48a" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+    <!-- pathLength makes the dots land evenly, the last one on the end point. -->
+    <path d="M262 192 C 300 156, 360 156, 398 192" pathLength="130" fill="none" stroke="url(#arrow)" stroke-width="4" stroke-linecap="round" stroke-dasharray="0.01 10"/>
+    <!-- The head points along the curve's direction at its end (from the last control point). -->
+    <path d="M396.2 177.7 L 399.5 193.4 L 383.6 191.0" fill="none" stroke="#22c48a" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
   </svg>
 
   <p class="foot">AppDoctor keeps itself up to date once it's installed.</p>
