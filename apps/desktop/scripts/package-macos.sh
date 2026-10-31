@@ -53,12 +53,21 @@ fi
 codesign --verify --strict "$APP"
 
 # The disk image opens to the app next to an Applications link, so installing
-# is a drag.
-STAGE=$(mktemp -d)
-cp -R "$APP" "$STAGE/"
-ln -s /Applications "$STAGE/Applications"
-hdiutil create -volname AppDoctor -srcfolder "$STAGE" -ov -format UDZO "$DMG"
-rm -rf "$STAGE"
+# is a drag. With dmgbuild (pip install dmgbuild) the window gets its
+# background, layout and volume icon (scripts/build-dmg.py); without it, a
+# plain window with the same two items. $DMGBUILD_PYTHON picks the Python
+# that has dmgbuild.
+PYTHON=${DMGBUILD_PYTHON:-python3}
+if "$PYTHON" -c "import dmgbuild" 2>/dev/null; then
+  "$PYTHON" "$(dirname "$0")/build-dmg.py" "$APP" "$DMG"
+else
+  echo "dmgbuild not found; making a plain disk image" >&2
+  STAGE=$(mktemp -d)
+  cp -R "$APP" "$STAGE/"
+  ln -s /Applications "$STAGE/Applications"
+  hdiutil create -volname AppDoctor -srcfolder "$STAGE" -ov -format UDZO "$DMG"
+  rm -rf "$STAGE"
+fi
 
 if [[ -n "${APPLE_SIGNING_IDENTITY:-}" ]]; then
   codesign --force --timestamp --sign "$APPLE_SIGNING_IDENTITY" "$DMG"

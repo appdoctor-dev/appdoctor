@@ -116,6 +116,11 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain"
           security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
           rm "$RUNNER_TEMP/certificate.p12"
+      - name: Install dmgbuild
+        run: |
+          python3 -m venv "$RUNNER_TEMP/dmgbuild"
+          "$RUNNER_TEMP/dmgbuild/bin/pip" install --quiet dmgbuild==1.6.5
+          echo "DMGBUILD_PYTHON=$RUNNER_TEMP/dmgbuild/bin/python" >> "$GITHUB_ENV"
       - name: Bundle
         env:
           APPLE_SIGNING_IDENTITY: ${{ env.SIGN == 'true' && secrets.APPLE_SIGNING_IDENTITY || '' }}

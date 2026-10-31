@@ -1,0 +1,62 @@
+<!doctype html>
+<!--
+  The background of the AppDoctor.dmg window, 660 × 420 points. Finder draws
+  the two icons on top, centred at (165, 196) and (495, 196) (see
+  scripts/dmg-settings.py), with their names below them in dark text, which
+  is why the background is light. Render it with
+  scripts/render-dmg-background.sh after changing it.
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; width: 660px; height: 420px; overflow: hidden; }
+  body {
+    position: relative;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+    color: #1d1d1f;
+    background:
+      radial-gradient(150px 130px at 165px 196px, rgb(124 92 255 / 0.16), transparent 70%),
+      radial-gradient(150px 130px at 495px 196px, rgb(52 211 153 / 0.14), transparent 70%),
+      linear-gradient(180deg, #ffffff 0%, #f6f4ff 100%);
+  }
+  h1 { position: absolute; top: 40px; width: 100%; margin: 0; text-align: center; font-size: 21px; font-weight: 650; letter-spacing: -0.015em; }
+  p { position: absolute; width: 100%; margin: 0; text-align: center; }
+  .sub { top: 72px; font-size: 13px; color: #6e6e73; }
+  .foot { bottom: 20px; font-size: 11px; color: #9a99a8; }
+  .chip {
+    position: absolute; display: flex; align-items: center; gap: 5px;
+    padding: 5px 9px; border-radius: 999px; background: #fff;
+    font-size: 11.5px; font-weight: 600; white-space: nowrap;
+    box-shadow: 0 0 0 0.5px rgb(0 0 0 / 0.08), 0 4px 12px -2px rgb(70 50 160 / 0.18);
+  }
+  .chip small { font-weight: 500; color: #6e6e73; font-size: 11px; }
+  .up { color: #16a36a; }
+  .star { color: #f5a524; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; }
+  svg { position: absolute; left: 0; top: 0; }
+</style>
+</head>
+<body>
+  <h1>Install AppDoctor</h1>
+  <p class="sub">Drag the app onto the Applications folder.</p>
+
+  <div class="chip" style="left: 38px; top: 112px; transform: rotate(-6deg)"><span class="up">↑ 12</span><small>sleep timer</small></div>
+  <div class="chip" style="right: 44px; top: 106px; transform: rotate(7deg); background: #6a45f0; color: #fff; box-shadow: 0 4px 14px -2px rgb(106 69 240 / 0.45)">#1</div>
+  <div class="chip" style="left: 70px; top: 318px; transform: rotate(5deg)"><span class="star">★</span>4.8</div>
+  <div class="chip" style="right: 58px; top: 322px; transform: rotate(-5deg)"><span class="dot" style="background: #34d399"></span><small>rain sounds</small> #3</div>
+
+  <svg width="660" height="420" viewBox="0 0 660 420" aria-hidden="true">
+    <defs>
+      <linearGradient id="arrow" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0" stop-color="#8a72ff"/>
+        <stop offset="1" stop-color="#22c48a"/>
+      </linearGradient>
+    </defs>
+    <path d="M262 192 C 300 156, 360 156, 398 192" fill="none" stroke="url(#arrow)" stroke-width="4" stroke-linecap="round" stroke-dasharray="1 10"/>
+    <path d="M383 175 L 400 194 L 376 199" fill="none" stroke="#22c48a" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+
+  <p class="foot">AppDoctor keeps itself up to date once it's installed.</p>
+</body>
+</html>
