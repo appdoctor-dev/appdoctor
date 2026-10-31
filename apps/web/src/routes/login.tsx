@@ -30,12 +30,14 @@ function Login() {
   useEffect(() => {
     if (!token || redeemed.current) return
     redeemed.current = true
-    authClient.magicLink.verify({ query: { token } }).then(({ error }) => {
-      if (error) {
+    // A good token answers with the new session; a bad one answers with a
+    // redirect to an error page instead of an error, so check for the session.
+    authClient.magicLink.verify({ query: { token } }).then(({ data }) => {
+      if (data && typeof data === "object" && "session" in data) {
+        window.location.replace(redirect)
+      } else {
         setError("That sign-in link has expired or was already used. Send yourself a new one.")
         setState("idle")
-      } else {
-        window.location.replace(redirect)
       }
     })
   }, [token, redirect])
