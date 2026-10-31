@@ -204,10 +204,17 @@ impl AppSearch {
                             .text_color(theme.primary)
                             .into_any_element()
                     })
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.open = false;
-                        cx.emit(AppSearchEvent::Picked(picked.clone()));
-                    }))
+                    // On mouse down, not click: the list floats outside the
+                    // field's bounds, so the field's mouse-down-outside closes
+                    // it before a click could finish, and nothing was picked.
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _, _, cx| {
+                            this.open = false;
+                            cx.emit(AppSearchEvent::Picked(picked.clone()));
+                            cx.notify();
+                        }),
+                    )
             })
             .collect();
         let empty = rows.is_empty();
