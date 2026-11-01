@@ -1,10 +1,12 @@
 # Builds the desktop app for macOS (one universal .dmg) and Windows (.zip) and
 # attaches both to a GitHub release.
 #
-# - Push a tag that matches the version in Cargo.toml (v0.2.0) to publish a
-#   release.
-# - Run it by hand (Actions → Release → Run workflow) for a draft release you
-#   can test before anyone sees it.
+# - Run it by hand on main (Actions → Release → Run workflow, or
+#   `gh workflow run release.yml -f bump=patch`). It raises the version
+#   (patch, minor or major), builds, and only once every build has passed
+#   commits the new version to main, tags it and publishes the release. If a
+#   job fails, nothing is committed: fix it and run it again.
+# - Or raise `version` in Cargo.toml yourself and push a matching tag (v0.2.0).
 #
 # The asset names never change, so .../releases/latest/download/AppDoctor-macOS.dmg
 # always fetches the newest build; appdoctor.so's download buttons use them.
@@ -28,6 +30,12 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      bump:
+        description: Which part of the version to raise
+        type: choice
+        options: [patch, minor, major]
+        default: patch
 
 permissions:
   contents: write
@@ -50,11 +58,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - id: version
+        env:
+          BUMP: ${{ inputs.bump }}
         run: |
-          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
-          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" != "v$version" ]]; then
-            echo "::error::The tag $GITHUB_REF_NAME doesn't match the version in Cargo.toml ($version)."
-            exit 1
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+            if [[ "$GITHUB_REF_NAME" != "v$version" ]]; then
+              echo "::error::The tag $GITHUB_REF_NAME doesn't match the version in Cargo.toml ($version)."
+              exit 1
+            fi
+          else
+            if [[ "$GITHUB_REF_NAME" != "main" ]]; then
+              echo "::error::Run the release on main."
+              exit 1
+            fi
+            version=$(apps/desktop/scripts/bump-version.sh "$BUMP")
+            if git ls-remote --exit-code --tags origin "v$version" >/dev/null; then
+              echo "::error::v$version is already tagged. Pull main and run it again."
+              exit 1
+            fi
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
@@ -70,6 +92,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - name: Raise the version
+        if: github.ref_type != 'tag'
+        run: apps/desktop/scripts/bump-version.sh ${{ needs.version.outputs.version }}
       - name: Install Rust
         run: |
           channel=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)
@@ -183,6 +208,7 @@ jobs:
       TAG: v${{ needs.version.outputs.version }}
       VERSION: ${{ needs.version.outputs.version }}
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           pattern: release-*
@@ -210,15 +236,17 @@ jobs:
             '{version: $version, platforms: {macos: $macos, windows: $windows}}' > dist/latest.json
           rm "$key"
           cat dist/latest.json
+      - name: Commit and tag the new version
+        if: github.ref_type != 'tag'
+        run: |
+          apps/desktop/scripts/bump-version.sh "$VERSION"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -qm "AppDoctor $VERSION" Cargo.toml Cargo.lock
+          git tag "$TAG"
+          git push origin HEAD:main "$TAG"
       - name: Publish
         run: |
-          # A draft left from a test run would block this tag; replace it.
-          if [[ "$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null)" == "true" ]]; then
-            gh release delete "$TAG" --yes
-          fi
-          draft=()
-          [[ "$GITHUB_REF_TYPE" == "tag" ]] || draft=(--draft)
           files=(dist/AppDoctor-macOS.dmg dist/AppDoctor-Windows-x64.zip)
           [[ -f dist/latest.json ]] && files+=(dist/latest.json)
-          gh release create "$TAG" "${files[@]}" \
-            --title "AppDoctor $VERSION" --generate-notes --target "$GITHUB_SHA" "${draft[@]}"
+          gh release create "$TAG" "${files[@]}" --verify-tag --title "AppDoctor $VERSION" --generate-notes
