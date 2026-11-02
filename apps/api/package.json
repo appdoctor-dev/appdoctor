@@ -12,7 +12,7 @@
     "check-types": "tsc --noEmit",
     "cf-typegen": "wrangler types",
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
-    "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
+    "db:migrate:remote": "CLOUDFLARE_ACCOUNT_ID=626a497091279ca6bff81c9a37baf100 wrangler d1 migrations apply DB --remote --env production",
     "keys:generate": "node scripts/generate-license-keys.mjs",
     "auth:generate": "npx @better-auth/cli@latest generate --config better-auth.config.ts --output ../../packages/db/src/auth-schema.ts --yes",
     "stripe:listen": "stripe listen --forward-to localhost:8787/auth/stripe/webhook"
