@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as AdminRouteImport } from './routes/_admin'
 import { Route as AdminIndexRouteImport } from './routes/_admin/index'
 import { Route as AdminAlertsRouteImport } from './routes/_admin/alerts'
+import { Route as AdminAnalyticsRouteImport } from './routes/_admin/analytics'
 import { Route as AdminPricingRouteImport } from './routes/_admin/pricing'
 import { Route as AdminReleasesRouteImport } from './routes/_admin/releases'
 import { Route as AdminSubscribersRouteImport } from './routes/_admin/subscribers'
@@ -32,6 +33,11 @@ const AdminIndexRoute = AdminIndexRouteImport.update({
 const AdminAlertsRoute = AdminAlertsRouteImport.update({
   id: '/alerts',
   path: '/alerts',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminAnalyticsRoute = AdminAnalyticsRouteImport.update({
+  id: '/analytics',
+  path: '/analytics',
   getParentRoute: () => AdminRoute,
 } as any)
 const AdminPricingRoute = AdminPricingRouteImport.update({
@@ -73,6 +79,7 @@ const ApiAdminSplatRoute = ApiAdminSplatRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof AdminIndexRoute
   '/alerts': typeof AdminAlertsRoute
+  '/analytics': typeof AdminAnalyticsRoute
   '/pricing': typeof AdminPricingRoute
   '/releases': typeof AdminReleasesRoute
   '/subscribers': typeof AdminSubscribersRoute
@@ -83,6 +90,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/alerts': typeof AdminAlertsRoute
+  '/analytics': typeof AdminAnalyticsRoute
   '/pricing': typeof AdminPricingRoute
   '/releases': typeof AdminReleasesRoute
   '/subscribers': typeof AdminSubscribersRoute
@@ -96,6 +104,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_admin': typeof AdminRouteWithChildren
   '/_admin/alerts': typeof AdminAlertsRoute
+  '/_admin/analytics': typeof AdminAnalyticsRoute
   '/_admin/pricing': typeof AdminPricingRoute
   '/_admin/releases': typeof AdminReleasesRoute
   '/_admin/subscribers': typeof AdminSubscribersRoute
@@ -110,6 +119,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/alerts'
+    | '/analytics'
     | '/pricing'
     | '/releases'
     | '/subscribers'
@@ -120,6 +130,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/alerts'
+    | '/analytics'
     | '/pricing'
     | '/releases'
     | '/subscribers'
@@ -132,6 +143,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/_admin'
     | '/_admin/alerts'
+    | '/_admin/analytics'
     | '/_admin/pricing'
     | '/_admin/releases'
     | '/_admin/subscribers'
@@ -169,6 +181,13 @@ declare module '@tanstack/react-router' {
       path: '/alerts'
       fullPath: '/alerts'
       preLoaderRoute: typeof AdminAlertsRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/_admin/analytics': {
+      id: '/_admin/analytics'
+      path: '/analytics'
+      fullPath: '/analytics'
+      preLoaderRoute: typeof AdminAnalyticsRouteImport
       parentRoute: typeof AdminRoute
     }
     '/_admin/pricing': {
@@ -225,6 +244,7 @@ declare module '@tanstack/react-router' {
 
 interface AdminRouteChildren {
   AdminAlertsRoute: typeof AdminAlertsRoute
+  AdminAnalyticsRoute: typeof AdminAnalyticsRoute
   AdminPricingRoute: typeof AdminPricingRoute
   AdminReleasesRoute: typeof AdminReleasesRoute
   AdminSubscribersRoute: typeof AdminSubscribersRoute
@@ -235,6 +255,7 @@ interface AdminRouteChildren {
 
 const AdminRouteChildren: AdminRouteChildren = {
   AdminAlertsRoute: AdminAlertsRoute,
+  AdminAnalyticsRoute: AdminAnalyticsRoute,
   AdminPricingRoute: AdminPricingRoute,
   AdminReleasesRoute: AdminReleasesRoute,
   AdminSubscribersRoute: AdminSubscribersRoute,

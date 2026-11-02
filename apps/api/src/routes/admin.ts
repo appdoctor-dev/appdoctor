@@ -1,10 +1,11 @@
 import { zValidator } from "@hono/zod-validator";
-import { activations, alerts, plans, releases, subscription, user } from "@repo/db";
+import { activations, alerts, plans, subscription, user } from "@repo/db";
 import { and, asc, count, desc, eq, gte, inArray, isNull, like, or, type SQL } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../env";
-import { ARCHES, PLATFORMS } from "../lib/releases";
+import { siteAnalytics } from "../lib/analytics";
+import { searchQueries } from "../lib/search-console";
 
 const ENTITLED = ["active", "trialing", "past_due"];
 const DAY_MS = 86_400_000;
@@ -40,13 +41,7 @@ const page = {
   q: z.string().max(100).optional(),
 };
 
-const upload = z.object({
-  version: z.string().regex(/^v?\d+\.\d+\.\d+(-[\w.]+)?$/, "semver like 1.2.3"),
-  platform: z.enum(PLATFORMS),
-  arch: z.enum(ARCHES),
-  filename: z.string().min(1).max(200).regex(/^[\w.\- ]+$/),
-  contentType: z.string().max(100).default("application/octet-stream"),
-});
+const period = z.object({ days: z.coerce.number().int().min(1).max(400).default(30) });
 
 /**
  * Served only through the AdminEntrypoint service binding (see index.ts), so
@@ -316,94 +311,10 @@ export const adminApi = new Hono<AppEnv>()
     return c.json({ ok: true });
   })
 
-  .get("/releases", async (c) => {
-    return c.json(await c.var.db.select().from(releases).orderBy(desc(releases.createdAt)));
+  .get("/analytics", zValidator("query", period), async (c) => {
+    return c.json(await siteAnalytics(c.var.db, c.req.valid("query").days));
   })
 
-  // Builds upload as an R2 multipart upload in chunks, which keeps each request
-  // under the Workers body limit regardless of installer size.
-  .post("/releases/uploads", zValidator("json", upload), async (c) => {
-    const body = c.req.valid("json");
-    const key = `releases/${body.version}/${body.platform}-${body.arch}/${body.filename}`;
-    const exists = await c.var.db.query.releases.findFirst({
-      where: and(eq(releases.version, body.version), eq(releases.platform, body.platform), eq(releases.arch, body.arch)),
-    });
-    if (exists) return c.json({ error: "release_exists" as const }, 409);
-    const multipart = await c.env.RELEASES.createMultipartUpload(key, {
-      httpMetadata: { contentType: body.contentType },
-    });
-    return c.json({ key, uploadId: multipart.uploadId });
-  })
-
-  .put(
-    "/releases/uploads/:uploadId/parts/:partNumber",
-    zValidator("query", z.object({ key: z.string().startsWith("releases/") })),
-    async (c) => {
-      const multipart = c.env.RELEASES.resumeMultipartUpload(c.req.valid("query").key, c.req.param("uploadId"));
-      const part = await multipart.uploadPart(Number(c.req.param("partNumber")), await c.req.arrayBuffer());
-      return c.json({ partNumber: part.partNumber, etag: part.etag });
-    },
-  )
-
-  .post(
-    "/releases/uploads/:uploadId/complete",
-    zValidator(
-      "json",
-      upload.extend({
-        key: z.string().startsWith("releases/"),
-        size: z.number().int().positive(),
-        notes: z.string().max(5000).default(""),
-        signature: z.string().max(2000).nullable().default(null),
-        parts: z.array(z.object({ partNumber: z.number().int().positive(), etag: z.string() })).min(1),
-      }),
-    ),
-    async (c) => {
-      const body = c.req.valid("json");
-      const multipart = c.env.RELEASES.resumeMultipartUpload(body.key, c.req.param("uploadId"));
-      await multipart.complete(body.parts);
-      const [created] = await c.var.db
-        .insert(releases)
-        .values({
-          id: crypto.randomUUID(),
-          version: body.version,
-          platform: body.platform,
-          arch: body.arch,
-          r2Key: body.key,
-          filename: body.filename,
-          size: body.size,
-          notes: body.notes,
-          signature: body.signature,
-        })
-        .returning();
-      return c.json(created!, 201);
-    },
-  )
-
-  .patch(
-    "/releases/:id",
-    zValidator(
-      "json",
-      z.object({ published: z.boolean(), notes: z.string().max(5000), signature: z.string().max(2000).nullable() }).partial(),
-    ),
-    async (c) => {
-      const body = c.req.valid("json");
-      const [updated] = await c.var.db
-        .update(releases)
-        .set({
-          ...body,
-          ...(body.published !== undefined && { publishedAt: body.published ? new Date() : null }),
-        })
-        .where(eq(releases.id, c.req.param("id")))
-        .returning();
-      if (!updated) return c.json({ error: "not_found" as const }, 404);
-      return c.json(updated);
-    },
-  )
-
-  .delete("/releases/:id", async (c) => {
-    const release = await c.var.db.query.releases.findFirst({ where: eq(releases.id, c.req.param("id")) });
-    if (!release) return c.json({ error: "not_found" as const }, 404);
-    await c.env.RELEASES.delete(release.r2Key);
-    await c.var.db.delete(releases).where(eq(releases.id, release.id));
-    return c.json({ ok: true });
+  .get("/analytics/search", zValidator("query", period), async (c) => {
+    return c.json(await searchQueries(c.env, c.req.valid("query").days));
   });

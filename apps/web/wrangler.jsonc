@@ -24,7 +24,11 @@
 				"INDEXNOW_KEY": "8bef909a8fe2f7cfe1922e0d13a69266"
 			},
 			// Server-side reads (pricing, downloads) go straight to the API worker.
-			"services": [{ "binding": "API", "service": "appdoctor-api-production" }],
+			"services": [
+				{ "binding": "API", "service": "appdoctor-api-production" },
+				// Records visits for the admin's Analytics page (src/server/visits.ts).
+				{ "binding": "ANALYTICS", "service": "appdoctor-api-production", "entrypoint": "SiteEntrypoint" }
+			],
 			// www redirects to the apex, and app. serves sign-in and the
 			// account, in src/server.ts.
 			"routes": [

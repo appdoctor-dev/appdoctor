@@ -16,3 +16,7 @@ LICENSE_SIGNING_KEY=
 # Optional: enables "Continue with Google".
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
+
+# Optional: Search Console queries on the admin's Analytics page. A Google Cloud
+# service account's JSON key on one line; see scripts/search-console.sh.
+GSC_SERVICE_ACCOUNT=

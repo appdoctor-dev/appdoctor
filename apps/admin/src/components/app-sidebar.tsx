@@ -1,6 +1,7 @@
 import { Link } from "@tanstack/react-router"
 import {
   BellIcon,
+  ChartColumnIcon,
   CreditCardIcon,
   LayoutDashboardIcon,
   LogOutIcon,
@@ -22,6 +23,7 @@ import {
 
 const nav = [
   { to: "/", label: "Dashboard", icon: LayoutDashboardIcon },
+  { to: "/analytics", label: "Analytics", icon: ChartColumnIcon },
   { to: "/subscribers", label: "Subscribers", icon: CreditCardIcon },
   { to: "/users", label: "Users", icon: UsersIcon },
   { to: "/pricing", label: "Pricing", icon: TagIcon },

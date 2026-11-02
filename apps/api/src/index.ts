@@ -1,4 +1,4 @@
-import { createDb } from "@repo/db";
+import { createDb, type NewSiteVisit } from "@repo/db";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -7,6 +7,7 @@ import type { ErrorHandler } from "hono";
 import Stripe from "stripe";
 import { createAuth, createStripe } from "./auth";
 import type { AppEnv, Bindings } from "./env";
+import { recordVisit } from "./lib/analytics";
 import { adminApi } from "./routes/admin";
 import { v1 } from "./routes/v1";
 
@@ -90,6 +91,13 @@ admin.onError(onError);
 export class AdminEntrypoint extends WorkerEntrypoint<Bindings> {
   override fetch(request: Request) {
     return admin.fetch(request, this.env, this.ctx);
+  }
+}
+
+/** Bound by the web Worker as `ANALYTICS` (`entrypoint: "SiteEntrypoint"`): it records site visits. */
+export class SiteEntrypoint extends WorkerEntrypoint<Bindings> {
+  async recordVisit(visit: NewSiteVisit) {
+    await recordVisit(createDb(this.env.DB), visit);
   }
 }
 

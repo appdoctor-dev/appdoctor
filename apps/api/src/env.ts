@@ -7,7 +7,6 @@ import type { Auth } from "./auth";
 // own global `Env` is a different shape.
 export type Bindings = {
   DB: D1Database;
-  RELEASES: R2Bucket;
 
   API_URL: string;
   WEB_URL: string;
@@ -29,6 +28,10 @@ export type Bindings = {
   EMAIL?: SendEmail;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
+  /** A Google Cloud service account's JSON key, for Search Console queries in the admin. */
+  GSC_SERVICE_ACCOUNT?: string;
+  /** The Search Console property; `sc-domain:appdoctor.so` when unset. */
+  GSC_SITE?: string;
 };
 
 type SessionUser = Auth["$Infer"]["Session"]["user"];

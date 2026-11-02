@@ -56,26 +56,33 @@ export const activations = sqliteTable(
   (t) => [uniqueIndex("activations_user_device_idx").on(t.userId, t.deviceId)],
 );
 
-export const releases = sqliteTable(
-  "releases",
+/**
+ * Website traffic, recorded by the web Worker without cookies or IP addresses.
+ * A row is either a person arriving from outside the site (a landing: where
+ * they came from, the country, the page) or an AI or search agent reading a
+ * page (`agent` set). Feeds the admin's Analytics page.
+ */
+export const siteVisits = sqliteTable(
+  "site_visits",
   {
-    id: text("id").primaryKey(),
-    version: text("version").notNull(),
-    platform: text("platform", { enum: ["macos", "windows"] }).notNull(),
-    arch: text("arch", { enum: ["arm64", "x64", "universal"] }).notNull(),
-    r2Key: text("r2_key").notNull().unique(),
-    filename: text("filename").notNull(),
-    size: integer("size").notNull(),
-    // Updater signature for the artifact (verified by the desktop app).
-    signature: text("signature"),
-    notes: text("notes").notNull().default(""),
-    published: integer("published", { mode: "boolean" }).notNull().default(false),
-    publishedAt: integer("published_at", { mode: "timestamp" }),
-    createdAt: integer("created_at", { mode: "timestamp" })
-      .notNull()
-      .default(sql`(unixepoch())`),
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    at: integer("at", { mode: "timestamp_ms" }).notNull(),
+    path: text("path").notNull(),
+    country: text("country"), // ISO 3166 code from Cloudflare
+    // People: "Google", "ChatGPT", "Direct", or the referring host.
+    source: text("source"),
+    channel: text("channel", { enum: ["search", "ai", "social", "referral", "email", "campaign", "direct"] }),
+    referrer: text("referrer"), // the referring host only
+    query: text("query"), // search terms, when the referrer or utm_term carries them
+    utmSource: text("utm_source"),
+    utmMedium: text("utm_medium"),
+    utmCampaign: text("utm_campaign"),
+    device: text("device", { enum: ["mobile", "tablet", "desktop"] }),
+    // Agents, as their user agent names them.
+    agent: text("agent"),
+    agentKind: text("agent_kind", { enum: ["assistant", "ai-search", "ai-training", "search"] }),
   },
-  (t) => [uniqueIndex("releases_version_target_idx").on(t.version, t.platform, t.arch)],
+  (t) => [index("site_visits_at_idx").on(t.at)],
 );
 
 /** Refunds, disputes and fraud warnings surfaced in the admin for a human to act on. */
@@ -100,5 +107,6 @@ export const alerts = sqliteTable(
 
 export type Plan = typeof plans.$inferSelect;
 export type Activation = typeof activations.$inferSelect;
-export type Release = typeof releases.$inferSelect;
+export type SiteVisit = typeof siteVisits.$inferSelect;
+export type NewSiteVisit = typeof siteVisits.$inferInsert;
 export type Alert = typeof alerts.$inferSelect;

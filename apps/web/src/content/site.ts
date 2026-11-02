@@ -67,6 +67,7 @@ export const PRIVACY_POINTS = [
   "Your keywords, rankings and App Store Connect key are stored on your computer, not on our servers.",
   "Searches and rank checks go from your computer to Apple directly.",
   "Our server only knows your email address, your subscription and which devices are signed in.",
+  "This website counts visits without cookies. It notes the page, your country, phone or computer, and the site or search that sent you. It doesn't keep your IP address, can't tell one visit from the next, and deletes the records after 13 months.",
   "The code is open source, so you can check all of this yourself.",
 ]
 

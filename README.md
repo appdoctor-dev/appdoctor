@@ -9,7 +9,7 @@ Website and downloads: [appdoctor.so](https://appdoctor.so)
 | Path | What it is |
 | --- | --- |
 | `apps/desktop`, `crates/*` | The native app (Rust + GPUI) for macOS and Windows. See [apps/desktop/README.md](apps/desktop/README.md). |
-| `apps/api` | Hono on Cloudflare Workers. Better Auth (magic link, Google, desktop device sign-in) with the Stripe plugin for subscriptions; D1 + R2. Admin routes are served only through a private service binding. |
+| `apps/api` | Hono on Cloudflare Workers. Better Auth (magic link, Google, desktop device sign-in) with the Stripe plugin for subscriptions; D1. Admin routes are served only through a private service binding. |
 | `apps/web` | Marketing site (TanStack Start): landing, pricing, download, account, docs, blog, and the agent layer (`llms.txt`, Markdown pages, sitemap, robots, RSS). |
 | `apps/admin` | Admin (TanStack Start + shadcn): revenue, subscribers, users, pricing, releases, Stripe alerts. Protected by Cloudflare Access (Zero Trust). |
 | `packages/db` | Drizzle schema and D1 migrations, shared by the API. |
@@ -97,14 +97,10 @@ Locally the admin dev server also runs the API inside it (so its private `API` b
 ## Deploy (Cloudflare)
 
 1. The configs use `appdoctor.so`. To use another domain, change it in the three `wrangler.jsonc` files and `apps/web/.env.production`.
-2. Create the database and bucket, and put the D1 `database_id` in `apps/api/wrangler.jsonc`:
+2. Create the database, and put its `database_id` in `apps/api/wrangler.jsonc`:
 
    ```bash
    npx wrangler d1 create appdoctor
-   ```
-
-   ```bash
-   npx wrangler r2 bucket create appdoctor-releases
    ```
 
    Sign-in emails go out through Cloudflare Email Sending, with no API key. Turn it on for the domain once; it adds the SPF and DKIM records:

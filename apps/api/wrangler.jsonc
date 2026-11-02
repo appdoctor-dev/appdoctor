@@ -24,7 +24,6 @@
 			"migrations_dir": "../../packages/db/migrations"
 		}
 	],
-	"r2_buckets": [{ "binding": "RELEASES", "bucket_name": "appdoctor-releases" }],
 	"env": {
 		// `npm run deploy -w @repo/api` deploys this to api.appdoctor.so.
 		"production": {
@@ -46,7 +45,6 @@
 					"migrations_dir": "../../packages/db/migrations"
 				}
 			],
-			"r2_buckets": [{ "binding": "RELEASES", "bucket_name": "appdoctor-releases" }],
 			// Sign-in emails, through Cloudflare Email Sending. Only production has it,
 			// so locally the links are printed in the console instead.
 			"send_email": [{ "name": "EMAIL", "allowed_sender_addresses": ["hello@appdoctor.so"] }],

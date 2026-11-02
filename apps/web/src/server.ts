@@ -1,7 +1,8 @@
 /**
  * Worker entry (wrangler `main`). Wraps TanStack Start's handler to serve the
  * agent endpoints and Markdown versions of pages (src/server/agent.ts), and to
- * add discovery Link headers to every HTML page.
+ * add discovery Link headers to every HTML page. Visits to the website are
+ * recorded for the admin's Analytics page (src/server/visits.ts).
  *
  * One Worker answers three hosts: the website (appdoctor.so), www (which
  * redirects to it), and app.appdoctor.so, where people sign in and manage
@@ -10,6 +11,7 @@
 import handler, { createServerEntry } from "@tanstack/react-start/server-entry"
 import { appUrl, siteUrl } from "./server/api"
 import { decorateHtml, handleAgentRequest } from "./server/agent"
+import { recordVisit } from "./server/visits"
 
 /** Pages that belong to the app host. */
 const APP_PATHS = ["/login", "/account", "/device"]
@@ -45,10 +47,9 @@ export default createServerEntry({
     }
     if (separateApp && isAppPath(url.pathname)) return moved(app, url)
 
-    if (request.method === "GET" || request.method === "HEAD") {
-      const agentResponse = await handleAgentRequest(request, site)
-      if (agentResponse) return agentResponse
-    }
-    return decorateHtml(await handler.fetch(request, opts), url)
+    const agentResponse = request.method === "GET" || request.method === "HEAD" ? await handleAgentRequest(request, site) : null
+    const response = agentResponse ?? decorateHtml(await handler.fetch(request, opts), url)
+    recordVisit(request, url, response)
+    return response
   },
 })
