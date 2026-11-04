@@ -84,6 +84,7 @@ pub fn tools() -> Vec<Value> {
     tools.extend(crate::creative::tools());
     tools.extend(crate::simulator::tools());
     tools.extend(crate::listing::tools());
+    tools.extend(crate::versions::tools());
     tools
 }
 
@@ -371,6 +372,9 @@ pub fn call(data_dir: &Path, name: &str, args: &Value) -> Result<Vec<Value>> {
     if let Some(result) = crate::listing::call(data_dir, name, &args) {
         return result;
     }
+    if let Some(result) = crate::versions::call(data_dir, name, &args) {
+        return result;
+    }
     match name {
         "list_apps" => list_apps(data_dir),
         "design_options" => Ok(text(design_options())),
@@ -559,6 +563,7 @@ fn list_fonts(query: Option<&str>) -> Value {
 
 /// One app's design for one device, read from disk.
 pub(crate) struct Doc {
+    data_dir: PathBuf,
     pub(crate) app_id: u64,
     pub(crate) folder: PathBuf,
     pub(crate) target: Target,
@@ -580,6 +585,7 @@ impl Doc {
         let folder = screenshots_folder(data_dir, app_id);
         let design = Design::load_for(&folder, target);
         Ok(Doc {
+            data_dir: data_dir.to_owned(),
             app_id,
             folder,
             target,
@@ -588,8 +594,13 @@ impl Doc {
     }
 
     pub(crate) fn save(&self) -> Result<()> {
-        write_atomic(&self.folder.join(self.target.file_name()), &self.design.to_json())
-            .map_err(|error| format!("Couldn't save the design: {error}"))
+        let path = self.folder.join(self.target.file_name());
+        // What the agent is changing stays in the design's history. That's
+        // no reason to refuse the edit if it can't be kept.
+        if let (Ok(before), Ok(store)) = (std::fs::read(&path), store(&self.data_dir)) {
+            let _ = store.save_design_before_agent(self.app_id, self.target.slug(), &before, crate::listing::now());
+        }
+        write_atomic(&path, &self.design.to_json()).map_err(|error| format!("Couldn't save the design: {error}"))
     }
 
     pub(crate) fn next_id(&self) -> u64 {

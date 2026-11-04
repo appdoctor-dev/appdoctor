@@ -12,6 +12,7 @@ mod creative;
 mod design;
 mod listing;
 mod simulator;
+mod versions;
 
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
@@ -41,7 +42,9 @@ editable words. For the App Store listing (name, subtitle, keywords, description
 get_keywords shows the keywords the user tracks with their ranks, popularity and difficulty per country, \
 get_listing shows the listing as last pulled from App Store Connect, and suggest_listing proposes edits the \
 user reviews and saves in AppDoctor; nothing reaches the App Store without them. aso_audit scores the whole \
-product page and lists what to fix first. \
+product page and lists what to fix first. AppDoctor keeps earlier versions of each design and each language \
+of the listing: list_versions and restore_version go back to one (save_version names the design before a big \
+change), and list_listing_versions shows a language's, to bring back through suggest_listing. \
 Start with list_apps and get_design, use design_options and list_fonts for \
 allowed values, and look at your work with render_slide before you say it's done. The user sees every \
 change live in AppDoctor and can undo it.";

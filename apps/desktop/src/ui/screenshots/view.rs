@@ -1204,12 +1204,22 @@ impl Render for ScreenshotsView {
                     .icon(gpui_kit::assets::IconName::Sparkles)
                     .label("AI")
                     .tooltip("Make with AI: Claude Code, Codex, Gemini or Ollama")
-                    .on_click(cx.listener(|this, _, _, cx| {
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.close_history(window, cx);
                         this.ai_open = !this.ai_open;
                         let left = this.left_open;
                         this.set_panels(left, true, cx);
                         cx.notify();
                     })),
+            )
+            .child(
+                Button::new("version-history")
+                    .small()
+                    .map(|button| if self.history.open { button.primary() } else { button.ghost() })
+                    .icon(gpui_kit::assets::IconName::Clock)
+                    .label("History")
+                    .tooltip("Earlier versions of this design")
+                    .on_click(cx.listener(|this, _, window, cx| this.toggle_history(window, cx))),
             )
             .when(self.design.video.is_some(), |this| {
                 this.child(
@@ -1239,7 +1249,7 @@ impl Render for ScreenshotsView {
                     .icon(IconName::ArrowDown)
                     .label("Export PNGs")
                     .loading(self.exporting && self.design.video.is_none())
-                    .disabled(self.exporting || self.design.slides.is_empty())
+                    .disabled(self.exporting || self.design.slides.is_empty() || self.history.viewing.is_some())
                     .on_click(cx.listener(|this, _, window, cx| this.export(window, cx))),
             )
             .when(self.design.video.is_some(), |this| {
@@ -1250,7 +1260,7 @@ impl Render for ScreenshotsView {
                         .icon(gpui_kit::assets::IconName::Clapperboard)
                         .label("Export video")
                         .loading(self.exporting)
-                        .disabled(self.exporting || self.design.slides.is_empty())
+                        .disabled(self.exporting || self.design.slides.is_empty() || self.history.viewing.is_some())
                         .on_click(cx.listener(|this, _, window, cx| this.export_video(window, cx))),
                 )
             });
@@ -1269,8 +1279,14 @@ impl Render for ScreenshotsView {
 
         let hidden = self.chrome_hidden;
         let fade = Animation::new(Duration::from_millis(if hidden { 140 } else { 260 })).with_easing(ease_in_out);
-        let tools = if self.preview { self.transport(cx) } else { self.tools_pill(cx) }
-            .with_animation(("tools", self.chrome_epoch), fade.clone(), move |this, d| {
+        let tools = if self.history.viewing.is_some() {
+            self.viewing_pill(cx)
+        } else if self.preview {
+            self.transport(cx)
+        } else {
+            self.tools_pill(cx)
+        }
+        .with_animation(("tools", self.chrome_epoch), fade.clone(), move |this, d| {
                 let t = if hidden { 1. - d } else { d };
                 this.opacity(t).mb(px(16. * (1. - t)))
             });
@@ -1355,6 +1371,8 @@ impl Render for ScreenshotsView {
             "right-panel",
             if self.ai_open {
                 self.ai.clone().into_any_element()
+            } else if self.history.open {
+                self.history_panel(cx).into_any_element()
             } else {
                 self.inspector(cx).into_any_element()
             },

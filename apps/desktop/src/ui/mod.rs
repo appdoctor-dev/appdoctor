@@ -13,6 +13,7 @@ mod release;
 mod screenshots;
 mod settings;
 mod shell;
+mod versions;
 mod widgets;
 
 pub use shell::Shell;

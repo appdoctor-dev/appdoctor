@@ -36,10 +36,12 @@ Marketing search terms: **aso tool**, **aso keyword research tools**.
 
 ### Localization by agent
 - "Localize my app into these languages": the agent drafts each locale's name, subtitle, keywords and description using per-country research, then saves them to App Store Connect drafts after confirmation
+- Version history for each language: what was pulled and saved, typed edits, and named versions, with what differs from the fields; restoring fills the fields, and only Review and Save changes App Store Connect
 
 ### Screenshot designer
 - Device frames (current iPhone/iPad/Mac sizes), text and caption editor, backgrounds, layout presets, all App Store sizes
 - AI "art director" that builds a screenshot from a prompt (concept from the user's appshots project; new code)
+- Version history for each design: versions save as you work and before an AI's edits, you can name one to keep it, click any to see it on the canvas, and restore it (undoable)
 
 ### App preview video designer
 - Animate screens in device frames with captions and motion; export App Store preview specs (resolution, length, H.264)

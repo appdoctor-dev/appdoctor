@@ -93,12 +93,12 @@ fn app(store: &Store, args: &Args) -> Result<(u64, appdoctor_store::AppRecord)> 
     Ok((id, app))
 }
 
-fn now() -> i64 {
+pub(crate) fn now() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64)
 }
 
 /// "3 days ago", for when something was checked or pulled.
-fn ago(at: i64) -> String {
+pub(crate) fn ago(at: i64) -> String {
     let seconds = (now() - at).max(0);
     match seconds {
         0..120 => "just now".into(),
@@ -197,7 +197,7 @@ fn repeated(text: &ListingText) -> Vec<String> {
         .collect()
 }
 
-fn fields_json(text: &ListingText) -> Value {
+pub(crate) fn fields_json(text: &ListingText) -> Value {
     let mut fields = serde_json::Map::new();
     for (key, _, limit, value) in text.fields() {
         fields.insert(

@@ -6,6 +6,10 @@
 //! (AppDoctor's `get_listing` tool). Their suggestions (`suggest_listing`)
 //! show here, per language, to review in the fields and save the usual way.
 //!
+//! Each language keeps its earlier versions: what was pulled and saved, edits
+//! about to be replaced, and versions the user named. Restoring one fills the
+//! fields; only Review and Save changes App Store Connect.
+//!
 //! Name and subtitle live on the app info; keywords, promotional text,
 //! description and what's new live on the App Store version. Each is
 //! editable only while its parent is (a version being prepared, say).
@@ -25,13 +29,15 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use appdoctor_store::{LOCALES, Listing, ListingDraft, ListingText, locale_name};
+use appdoctor_store::{LOCALES, Listing, ListingDraft, ListingText, ListingVersion, locale_name};
 
+use crate::rank_check::now;
 use crate::runtime;
 use crate::services::Services;
 use crate::state::{AppState, Section};
 use crate::theme::meter;
 use crate::ui::controls;
+use crate::ui::versions;
 use crate::ui::widgets::{self, pill, status_dot};
 
 const NAME_LIMIT: usize = 30;
@@ -40,8 +46,9 @@ const KEYWORDS_LIMIT: usize = 100;
 const PROMO_LIMIT: usize = 170;
 const DESCRIPTION_LIMIT: usize = 4000;
 const WHATS_NEW_LIMIT: usize = 4000;
-
-
+const HISTORY_PANEL: f32 = 320.;
+/// Typing in the fields becomes a version once it pauses this long.
+const SETTLE: std::time::Duration = std::time::Duration::from_secs(30);
 
 #[derive(Clone)]
 struct LocaleItem {
@@ -105,6 +112,14 @@ pub struct LocalizationView {
     reviewing: Option<String>,
     ai: Entity<crate::ui::screenshots::AiPanel>,
     ai_open: bool,
+    history_open: bool,
+    /// The shown language's earlier versions, newest first.
+    versions: Vec<ListingVersion>,
+    /// The version showing what it would change.
+    version_open: Option<i64>,
+    version_name: Entity<InputState>,
+    /// When the fields last changed, until that's been saved as a version.
+    edited_at: Option<std::time::Instant>,
     loading: bool,
     saving: bool,
     selected: Option<String>,
@@ -139,6 +154,7 @@ impl LocalizationView {
             })
             .collect();
         let add_locale = cx.new(|cx| SelectState::new(SearchableVec::new(items), None, window, cx).searchable(true));
+        let version_name = line("Name this version", window, cx);
 
         let mut subscriptions = vec![
             cx.observe(&state, |this, state, cx| {
@@ -148,6 +164,8 @@ impl LocalizationView {
                     this.status = None;
                     this.reviewing = None;
                     this.drafts.clear();
+                    this.versions.clear();
+                    this.version_open = None;
                     this.check_drafts(cx);
                 }
                 cx.notify();
@@ -157,17 +175,24 @@ impl LocalizationView {
                     this.add_locale(code, window, cx);
                 }
             }),
+            cx.subscribe(&version_name, |this, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::PressEnter { .. }) {
+                    this.name_version(cx);
+                }
+            }),
         ];
         for input in [&fields.name, &fields.subtitle, &fields.keywords, &fields.promo] {
-            subscriptions.push(cx.subscribe(input, |_, _, event: &InputEvent, cx| {
+            subscriptions.push(cx.subscribe(input, |this, _, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::Change) {
+                    this.edited_at = Some(std::time::Instant::now());
                     cx.notify();
                 }
             }));
         }
         for area in [&fields.description, &fields.whats_new] {
-            subscriptions.push(cx.subscribe(area, |_, _, event: &InputEvent, cx| {
+            subscriptions.push(cx.subscribe(area, |this, _, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::Change) {
+                    this.edited_at = Some(std::time::Instant::now());
                     cx.notify();
                 }
             }));
@@ -181,7 +206,10 @@ impl LocalizationView {
         cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(std::time::Duration::from_millis(1200)).await;
-                let alive = this.update(cx, |this, cx| this.check_drafts(cx));
+                let alive = this.update(cx, |this, cx| {
+                    this.check_drafts(cx);
+                    this.autosave_edits(cx);
+                });
                 if alive.is_err() {
                     return;
                 }
@@ -197,6 +225,11 @@ impl LocalizationView {
             reviewing: None,
             ai,
             ai_open: false,
+            history_open: false,
+            versions: Vec::new(),
+            version_open: None,
+            version_name,
+            edited_at: None,
             loading: false,
             saving: false,
             selected: None,
@@ -227,8 +260,9 @@ impl LocalizationView {
         self.drafts.iter().find(|d| d.locale == code)
     }
 
-    /// Saves what was pulled, for agents to read.
-    fn remember(&self, loaded: &Loaded, cx: &App) {
+    /// Saves what App Store Connect has, for agents to read and as a version
+    /// of each language it's new for.
+    fn remember(&self, loaded: &Loaded, label: &str, cx: &App) {
         let pulled_at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_secs() as i64);
@@ -251,9 +285,214 @@ impl LocalizationView {
                 pulled_at,
             })
             .collect();
-        if let Err(error) = self.services(cx).store.replace_listings(loaded.app_id, &listings) {
+        let services = self.services(cx);
+        if let Err(error) = services.store.replace_listings(loaded.app_id, &listings) {
             tracing::error!(%error, "saving the pulled listing");
         }
+        for listing in listings {
+            let text = without_empties(listing.text);
+            if let Err(error) = services
+                .store
+                .save_listing_version(loaded.app_id, &listing.locale, &text, label, false, pulled_at)
+            {
+                tracing::error!(%error, "saving a version of the listing");
+            }
+        }
+    }
+
+    /// What the fields hold now.
+    fn current_text(&self, cx: &App) -> ListingText {
+        without_empties(ListingText {
+            name: Some(Self::value(&self.fields.name, cx)),
+            subtitle: Some(Self::value(&self.fields.subtitle, cx)),
+            keywords: Some(Self::value(&self.fields.keywords, cx)),
+            promotional_text: Some(Self::value(&self.fields.promo, cx)),
+            description: Some(Self::area_value(&self.fields.description, cx)),
+            whats_new: Some(Self::area_value(&self.fields.whats_new, cx)),
+        })
+    }
+
+    fn refresh_versions(&mut self, cx: &mut Context<Self>) {
+        let app_id = self.state.read(cx).selected_app;
+        self.versions = match (app_id, &self.selected) {
+            (Some(app_id), Some(code)) => self.services(cx).store.listing_versions(app_id, code).unwrap_or_default(),
+            _ => Vec::new(),
+        };
+        cx.notify();
+    }
+
+    /// Keeps what's in the fields as a version, if it isn't saved anywhere,
+    /// before something replaces it.
+    fn keep_unsaved(&mut self, cx: &mut Context<Self>) {
+        let (Some(app_id), Some(code), Some(changes)) =
+            (self.state.read(cx).selected_app, self.selected.clone(), self.changes(cx))
+        else {
+            return;
+        };
+        if changes.lines.is_empty() {
+            return;
+        }
+        let saved = self
+            .services(cx)
+            .store
+            .save_listing_version(app_id, &code, &self.current_text(cx), "Unsaved edits", false, now());
+        if let Err(error) = saved {
+            tracing::error!(%error, "saving a version of the listing");
+        }
+        self.refresh_versions(cx);
+    }
+
+    /// Run often: typing that's paused becomes a version, so it survives
+    /// quitting before it's saved to App Store Connect.
+    fn autosave_edits(&mut self, cx: &mut Context<Self>) {
+        if self.edited_at.is_some_and(|at| at.elapsed() >= SETTLE) {
+            self.edited_at = None;
+            self.keep_unsaved(cx);
+        }
+    }
+
+    /// Keeps what's in the fields under the name typed for it.
+    fn name_version(&mut self, cx: &mut Context<Self>) {
+        let name = self.version_name.read(cx).value().trim().to_owned();
+        let (Some(app_id), Some(code)) = (self.state.read(cx).selected_app, self.selected.clone()) else {
+            return;
+        };
+        if name.is_empty() {
+            self.status = Some(Err("Type a name for the version first.".into()));
+            cx.notify();
+            return;
+        }
+        let saved = self
+            .services(cx)
+            .store
+            .save_listing_version(app_id, &code, &self.current_text(cx), &name, true, now());
+        self.status = Some(match saved {
+            Ok(_) => Ok(format!("Saved “{name}”. App Store Connect hasn't changed.")),
+            Err(error) => Err(format!("Couldn't save the version: {error}")),
+        });
+        self.refresh_versions(cx);
+    }
+
+    /// Puts a version's text in the fields that can change now, to look over
+    /// and save the usual way. What was there stays in the history.
+    fn restore_version(&mut self, id: i64, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(version) = self.versions.iter().find(|v| v.id == id).cloned() else {
+            return;
+        };
+        let Some((info_on, version_on)) = self.loaded.as_ref().map(|l| (l.info_editable, l.version_editable)) else {
+            return;
+        };
+        self.keep_unsaved(cx);
+        let t = version.text;
+        let set = |state: &Entity<InputState>, value: Option<String>, window: &mut Window, cx: &mut Context<Self>| {
+            state.update(cx, |input, cx| input.set_value(value.unwrap_or_default(), window, cx));
+        };
+        if info_on {
+            set(&self.fields.name, t.name, window, cx);
+            set(&self.fields.subtitle, t.subtitle, window, cx);
+        }
+        if version_on {
+            set(&self.fields.keywords, t.keywords, window, cx);
+            set(&self.fields.promo, t.promotional_text, window, cx);
+            let (description, whats_new) = (t.description.unwrap_or_default(), t.whats_new.unwrap_or_default());
+            self.fields.description.update(cx, |area, cx| area.set_value(description, window, cx));
+            self.fields.whats_new.update(cx, |area, cx| area.set_value(whats_new, window, cx));
+        }
+        self.reviewing = None;
+        self.version_open = None;
+        self.status = Some(Ok(match (info_on, version_on) {
+            (true, true) => "Restored in the fields: edit anything, then Review and Save.".into(),
+            (true, false) => "Restored the name and subtitle; the rest is read-only until the next version. Review and Save to keep them.".into(),
+            _ => "Restored all but the name and subtitle, which are read-only now. Review and Save to keep it.".to_owned(),
+        }));
+        cx.notify();
+    }
+
+    fn delete_version(&mut self, id: i64, cx: &mut Context<Self>) {
+        if let Err(error) = self.services(cx).store.delete_listing_version(id) {
+            self.status = Some(Err(format!("Couldn't delete the version: {error}")));
+        }
+        self.refresh_versions(cx);
+    }
+
+    fn history_panel(&self, code: &str, can_edit: bool, cx: &mut Context<Self>) -> Div {
+        let theme = cx.theme().clone();
+        let current = self.current_text(cx);
+        let top = {
+            let close = cx.listener(|this, _, _, cx| {
+                this.history_open = false;
+                cx.notify();
+            });
+            let save = cx.listener(|this, _, _, cx| this.name_version(cx));
+            versions::panel_top(format!("{}, on this computer", locale_name(code)), &self.version_name, close, save, cx)
+        };
+        let rows: Vec<_> = self
+            .versions
+            .iter()
+            .map(|version| {
+                let id = version.id;
+                let selected = self.version_open == Some(id);
+                let differences = differences(&version.text, &current);
+                let title = versions::title(&version.label);
+                let detail = format!(
+                    "{} · {}",
+                    versions::when(version.created_at),
+                    match differences.len() {
+                        0 => "same as the fields".to_owned(),
+                        1 => format!("{} differs", differences[0].0),
+                        count => format!("{count} fields differ"),
+                    }
+                );
+                let restorable = can_edit && !differences.is_empty();
+                versions::row(("listing-version", id as u64), selected, cx)
+                    .child(versions::heading(title.clone(), version.named, detail, cx))
+                    .when(selected, |this| {
+                        let restore =
+                            restorable.then(|| cx.listener(move |this, _, window, cx| this.restore_version(id, window, cx)));
+                        let view = cx.entity().downgrade();
+                        this.when(!differences.is_empty(), |this| this.child(controls::summary(differences, cx)))
+                            .child(versions::actions(restore, move |_, window, cx| {
+                                let view = view.clone();
+                                versions::confirm_delete(title.clone(), window, cx, move |_, cx| {
+                                    view.update(cx, |this, cx| this.delete_version(id, cx)).ok();
+                                });
+                            }))
+                    })
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.version_open = if this.version_open == Some(id) { None } else { Some(id) };
+                        cx.notify();
+                    }))
+            })
+            .collect();
+        let empty = rows.is_empty();
+        v_flex()
+            .w(px(HISTORY_PANEL))
+            .flex_shrink_0()
+            .h_full()
+            .bg(theme.sidebar)
+            .border_l_1()
+            .border_color(theme.border)
+            .child(top)
+            .child(
+                v_flex()
+                    .id("listing-versions")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .p(px(8.))
+                    .gap(px(2.))
+                    .children(rows)
+                    .when(empty, |this| {
+                        this.child(
+                            div()
+                                .px(px(9.))
+                                .py(px(10.))
+                                .text_size(px(12.))
+                                .text_color(theme.muted_foreground)
+                                .child("Earlier versions of this language appear here."),
+                        )
+                    }),
+            )
     }
 
     /// Puts a suggestion's fields in the editor, to look over and save.
@@ -261,6 +500,7 @@ impl LocalizationView {
         let Some(draft) = self.draft(code).cloned() else {
             return;
         };
+        self.keep_unsaved(cx);
         if self.selected.as_deref() != Some(code) {
             self.select(code, window, cx);
         }
@@ -464,7 +704,9 @@ impl LocalizationView {
                 this.loading = false;
                 match result {
                     Ok(loaded) => {
-                        this.remember(&loaded, cx);
+                        // Edits are judged against what was loaded before this.
+                        this.keep_unsaved(cx);
+                        this.remember(&loaded, "From App Store Connect", cx);
                         let keep = this
                             .selected
                             .clone()
@@ -472,7 +714,7 @@ impl LocalizationView {
                         let first = loaded.locales.first().map(|l| l.code.clone());
                         this.loaded = Some(loaded);
                         if let Some(code) = keep.or(first) {
-                            this.select(&code, window, cx);
+                            this.show_locale(&code, window, cx);
                         }
                     }
                     Err(error) => this.status = Some(Err(format!("{error:#}"))),
@@ -488,12 +730,21 @@ impl LocalizationView {
         self.loaded.as_ref()?.locales.iter().find(|l| l.code == code)
     }
 
+    /// Switches language, keeping any unsaved edits to the last one.
     fn select(&mut self, code: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.keep_unsaved(cx);
+        self.show_locale(code, window, cx);
+    }
+
+    /// Fills the fields with a language as App Store Connect has it.
+    fn show_locale(&mut self, code: &str, window: &mut Window, cx: &mut Context<Self>) {
         let Some(locale) = self.locale(code).cloned() else {
             return;
         };
         self.selected = Some(code.to_owned());
         self.reviewing = None;
+        self.version_open = None;
+        self.refresh_versions(cx);
         let info = locale.info.unwrap_or(AppInfoLocalization {
             id: String::new(),
             locale: code.to_owned(),
@@ -666,6 +917,7 @@ impl LocalizationView {
         });
         cx.spawn(async move |this, cx| {
             let result = save.await;
+            let saved = result.is_ok();
             this.update(cx, |this, cx| {
                 this.saving = false;
                 if result.is_ok()
@@ -684,8 +936,10 @@ impl LocalizationView {
                 cx.notify();
             })
             .ok();
-            // Re-read so the editor's baseline is what Apple now has.
-            this.update(cx, |this, cx| this.reload_after_save(cx)).ok();
+            // The editor's baseline is what Apple now has.
+            if saved {
+                this.update(cx, |this, cx| this.reload_after_save(cx)).ok();
+            }
         })
         .detach();
     }
@@ -710,8 +964,9 @@ impl LocalizationView {
             loaded
         });
         if let Some(loaded) = &self.loaded {
-            self.remember(loaded, cx);
+            self.remember(loaded, "Saved to App Store Connect", cx);
         }
+        self.refresh_versions(cx);
         cx.notify();
     }
 
@@ -962,6 +1217,30 @@ fn indexed_words(name: &str, subtitle: &str, keywords: &str) -> HashSet<String> 
         .collect()
 }
 
+/// The same text with empty fields as unset, however each got that way.
+fn without_empties(text: ListingText) -> ListingText {
+    let some = |value: Option<String>| value.filter(|value| !value.is_empty());
+    ListingText {
+        name: some(text.name),
+        subtitle: some(text.subtitle),
+        keywords: some(text.keywords),
+        promotional_text: some(text.promotional_text),
+        description: some(text.description),
+        whats_new: some(text.whats_new),
+    }
+}
+
+/// Where a version differs from `current`: each field's name and the version's text.
+fn differences(version: &ListingText, current: &ListingText) -> Vec<(String, String)> {
+    version
+        .fields()
+        .iter()
+        .zip(current.fields())
+        .filter(|(ours, theirs)| ours.3 != theirs.3)
+        .map(|((_, label, _, value), _)| (label.to_string(), preview(value.map_or("", String::as_str))))
+        .collect()
+}
+
 fn preview(text: &str) -> String {
     let flat = text.replace('\n', " ");
     if flat.chars().count() > 120 {
@@ -1017,7 +1296,20 @@ impl Render for LocalizationView {
             .map(|button| if ai_open { button.primary() } else { button.ghost() })
             .on_click(cx.listener(|this, _, _, cx| {
                 this.ai_open = !this.ai_open;
+                this.history_open = false;
                 cx.notify();
+            }));
+        let history_button = Button::new("localization-history")
+            .small()
+            .icon(gpui_kit::assets::IconName::Clock)
+            .label("History")
+            .tooltip("Earlier versions of this language")
+            .disabled(self.loaded.is_none())
+            .map(|button| if self.history_open { button.primary() } else { button.ghost() })
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.history_open = !this.history_open;
+                this.ai_open = false;
+                this.refresh_versions(cx);
             }));
         let with_ai = move |body: AnyElement, ai: Entity<crate::ui::screenshots::AiPanel>| {
             h_flex()
@@ -1084,6 +1376,7 @@ impl Render for LocalizationView {
                     .disabled(self.loading)
                     .on_click(cx.listener(|this, _, window, cx| this.load(window, cx))),
             )
+            .child(history_button)
             .child(ai_button);
 
         let Some(loaded) = self.loaded.clone() else {
@@ -1344,11 +1637,61 @@ impl Render for LocalizationView {
             ),
         );
 
-        let body = h_flex().size_full().child(locale_list).child(editor);
+        let history = self
+            .selected
+            .clone()
+            .filter(|_| self.history_open)
+            .map(|code| self.history_panel(&code, info_on || version_on, cx));
+        let body = h_flex().size_full().child(locale_list).child(editor).children(history);
         v_flex()
             .size_full()
             .child(header)
             .child(with_ai(body.into_any_element(), self.ai.clone()))
             .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use appdoctor_store::ListingText;
+
+    use super::{differences, without_empties};
+
+    #[test]
+    fn empty_and_unset_fields_are_the_same_text() {
+        let pulled = ListingText {
+            name: Some("Moonwake".into()),
+            subtitle: Some(String::new()),
+            ..ListingText::default()
+        };
+        let saved = ListingText {
+            name: Some("Moonwake".into()),
+            ..ListingText::default()
+        };
+        assert_eq!(without_empties(pulled), saved);
+    }
+
+    #[test]
+    fn differences_name_each_field_with_the_versions_text() {
+        let version = ListingText {
+            name: Some("Moonwake".into()),
+            subtitle: Some("Sleep sounds".into()),
+            keywords: None,
+            ..ListingText::default()
+        };
+        let current = ListingText {
+            name: Some("Moonwake".into()),
+            subtitle: Some("Gentle alarms".into()),
+            keywords: Some("sleep,rain".into()),
+            ..ListingText::default()
+        };
+        assert_eq!(
+            differences(&version, &current),
+            vec![
+                ("Subtitle".to_owned(), "Sleep sounds".to_owned()),
+                ("Keywords".to_owned(), "(empty)".to_owned()),
+            ]
+        );
+        assert!(differences(&version, &version).is_empty());
     }
 }

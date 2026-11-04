@@ -458,3 +458,51 @@ fn reads_keywords_and_listing_and_suggests_edits() {
     let (content, failed) = call(&server, "suggest_listing", json!({ "app_id": APP, "locale": "english", "name": "x", "note": "" }));
     assert!(failed && content[0]["text"].as_str().unwrap().contains("isn't an App Store Connect language"));
 }
+
+#[test]
+fn a_design_can_go_back_to_an_earlier_version() {
+    let dir = data_dir("versions");
+    let server = Server::new(dir.clone());
+    let store = Store::open(&dir.join("appdoctor.db")).unwrap();
+    call_json(&server, "add_slide", json!({ "app_id": APP }));
+    call_json(&server, "save_version", json!({ "app_id": APP, "name": "One slide" }));
+    call_json(&server, "add_slide", json!({ "app_id": APP }));
+    call_json(&server, "add_slide", json!({ "app_id": APP }));
+
+    // The agent's edits kept what was there before them.
+    let listed = call_json(&server, "list_versions", json!({ "app_id": APP }));
+    let versions = listed["versions"].as_array().unwrap();
+    assert!(versions.iter().any(|v| v["label"] == appdoctor_store::BEFORE_AGENT), "{listed}");
+    let named = versions.iter().find(|v| v["named"] == true).unwrap();
+    assert_eq!(named["label"], "One slide");
+    assert_eq!(named["slides"], 1);
+
+    let restored = call_json(&server, "restore_version", json!({ "app_id": APP, "version": named["id"] }));
+    assert_eq!(restored["slides"], 1);
+    assert_eq!(call_json(&server, "get_design", json!({ "app_id": APP }))["slides"].as_array().unwrap().len(), 1);
+
+    // What was there before the restore is still there to go back to.
+    let versions = store.design_versions(APP, "iphone").unwrap();
+    assert_eq!(versions[0].label, "Before restoring");
+    assert_eq!(Design::from_json(&versions[0].design).unwrap().slides.len(), 3);
+
+    let (content, failed) = call(&server, "restore_version", json!({ "app_id": APP, "version": 99999 }));
+    assert!(failed);
+    assert!(content[0]["text"].as_str().unwrap().contains("list_versions"));
+}
+
+#[test]
+fn a_listings_versions_can_be_read() {
+    let dir = data_dir("listing-versions");
+    let server = Server::new(dir.clone());
+    let store = Store::open(&dir.join("appdoctor.db")).unwrap();
+    let text = ListingText {
+        name: Some("Strobia".into()),
+        ..ListingText::default()
+    };
+    store.save_listing_version(APP, "en-US", &text, "From App Store Connect", false, 10).unwrap();
+    let listed = call_json(&server, "list_listing_versions", json!({ "app_id": APP, "locale": "en-US" }));
+    assert_eq!(listed["versions"].as_array().unwrap().len(), 1);
+    assert_eq!(listed["versions"][0]["label"], "From App Store Connect");
+    assert_eq!(listed["versions"][0]["fields"]["name"]["text"], "Strobia");
+}

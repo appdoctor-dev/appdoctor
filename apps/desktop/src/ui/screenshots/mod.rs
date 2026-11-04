@@ -9,13 +9,14 @@
 //!
 //! An AI agent can edit the same files through `appdoctor mcp`; the view
 //! watches the file and takes in changes it didn't write, as an undoable
-//! step.
+//! step. Earlier versions of a design are kept too (`history`).
 
 mod agent;
 mod ai;
 
 pub(crate) use ai::AiPanel;
 mod clips;
+mod history;
 mod inspector;
 mod view;
 
@@ -173,9 +174,10 @@ pub struct ScreenshotsView {
     /// The canvas scale last drawn at (screen px per canvas px).
     scale: f32,
     stage_scroll: ScrollHandle,
-    undo: Vec<Vec<Slide>>,
-    redo: Vec<Vec<Slide>>,
+    undo: Vec<(Vec<Slide>, Option<Video>)>,
+    redo: Vec<(Vec<Slide>, Option<Video>)>,
     last_edit: Instant,
+    history: history::History,
     thumbs: Vec<Option<Arc<Image>>>,
     inputs: Inputs,
     sliders: Sliders,
@@ -261,13 +263,19 @@ impl ScreenshotsView {
         let watch = cx.spawn_in(window, async move |this, cx| {
             loop {
                 cx.background_executor().timer(WATCH).await;
-                if this.update_in(cx, |this, window, cx| this.check_disk(window, cx)).is_err() {
+                let alive = this.update_in(cx, |this, window, cx| {
+                    this.check_disk(window, cx);
+                    this.autosave_version(cx);
+                });
+                if alive.is_err() {
                     break;
                 }
             }
         });
 
+        let (history, history_name) = history::History::new(window, cx);
         let mut subscriptions = vec![
+            history_name,
             cx.observe_in(&state, window, |this, _, window, cx| this.follow_app(window, cx)),
             cx.subscribe_in(&fonts, window, |this, _, event: &SelectEvent<_>, window, cx| {
                 if let SelectEvent::Confirm(Some(name)) = event
@@ -451,6 +459,7 @@ impl ScreenshotsView {
             undo: Vec::new(),
             redo: Vec::new(),
             last_edit: Instant::now() - COALESCE,
+            history,
             thumbs: Vec::new(),
             inputs,
             sliders,
@@ -502,7 +511,9 @@ impl ScreenshotsView {
         if (app, target) == (self.app_id, self.target) {
             return;
         }
+        self.stop_viewing();
         self.flush(cx);
+        self.version_leaving(cx);
         self.app_id = app;
         self.target = target;
         self.load(window, cx);
@@ -542,6 +553,7 @@ impl ScreenshotsView {
             .and_then(|path| std::fs::read(path).ok())
             .unwrap_or_default();
         self.next_id = self.design.max_id();
+        self.version_opened(cx);
         let started = self.design.slides.is_empty() && self.app_id.is_some();
         if started {
             let slide = Slide::starter(target, &app_name, &mut self.next_id);
@@ -571,6 +583,7 @@ impl ScreenshotsView {
         if self.folder(cx).is_none() {
             return;
         }
+        self.history.note_edit(false);
         self._save = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(Duration::from_millis(350)).await;
             let Ok(Some((path, bytes))) = this.update(cx, |this, cx| this.prepare_save(cx)) else {
@@ -593,6 +606,10 @@ impl ScreenshotsView {
     /// disk since it was last read: the watcher takes that in first, so an
     /// agent's edit is never overwritten.
     fn prepare_save(&mut self, cx: &App) -> Option<(PathBuf, Vec<u8>)> {
+        // An earlier version on the canvas is only being looked at.
+        if self.history.viewing.is_some() {
+            return None;
+        }
         let path = self.design_path(cx)?;
         if !self.last_disk.is_empty()
             && let Ok(disk) = std::fs::read(&path)
@@ -618,7 +635,7 @@ impl ScreenshotsView {
     /// Takes in edits made to the design file elsewhere (by an agent through
     /// `appdoctor mcp`) as one undoable step.
     fn check_disk(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.drag.is_some() {
+        if self.drag.is_some() || self.history.viewing.is_some() {
             return;
         }
         let Some(path) = self.design_path(cx) else {
@@ -634,12 +651,14 @@ impl ScreenshotsView {
             return;
         };
         self.last_disk = bytes;
-        if disk.slides == self.design.slides {
+        if disk.slides == self.design.slides && disk.video == self.design.video {
             return;
         }
         self._save = None;
         self.checkpoint();
+        self.history.note_edit(true);
         self.design.slides = disk.slides;
+        self.design.video = disk.video;
         self.next_id = self.next_id.max(self.design.max_id());
         self.slide = self.slide.min(self.design.slides.len().saturating_sub(1));
         if self.selected.is_some_and(|id| self.layer(id).is_none()) {
@@ -684,7 +703,7 @@ impl ScreenshotsView {
     // History
 
     fn checkpoint(&mut self) {
-        let snapshot = self.design.slides.clone();
+        let snapshot = (self.design.slides.clone(), self.design.video.clone());
         if self.undo.last() != Some(&snapshot) {
             self.undo.push(snapshot);
             if self.undo.len() > HISTORY {
@@ -704,16 +723,26 @@ impl ScreenshotsView {
 
     fn undo(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(previous) = self.undo.pop() {
-            self.redo.push(std::mem::replace(&mut self.design.slides, previous));
+            let now = self.swap_design(previous);
+            self.redo.push(now);
             self.after_history(window, cx);
         }
     }
 
     fn redo(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(next) = self.redo.pop() {
-            self.undo.push(std::mem::replace(&mut self.design.slides, next));
+            let now = self.swap_design(next);
+            self.undo.push(now);
             self.after_history(window, cx);
         }
+    }
+
+    /// Puts in an undo step's design and returns what it replaced.
+    fn swap_design(&mut self, (slides, video): (Vec<Slide>, Option<Video>)) -> (Vec<Slide>, Option<Video>) {
+        (
+            std::mem::replace(&mut self.design.slides, slides),
+            std::mem::replace(&mut self.design.video, video),
+        )
     }
 
     fn after_history(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -758,7 +787,7 @@ impl ScreenshotsView {
     // Editing
 
     fn edit_selected(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut Layer)) {
-        let Some(id) = self.selected else {
+        let Some(id) = self.selected.filter(|_| self.history.viewing.is_none()) else {
             return;
         };
         self.checkpoint_coalesced();
@@ -769,6 +798,9 @@ impl ScreenshotsView {
     }
 
     fn edit_background(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut Background)) {
+        if self.history.viewing.is_some() {
+            return;
+        }
         self.checkpoint_coalesced();
         if let Some(slide) = self.current_mut() {
             f(&mut slide.background);
@@ -778,6 +810,9 @@ impl ScreenshotsView {
 
     /// A one-off edit (a button): its own undo step, and controls refreshed.
     fn apply(&mut self, window: &mut Window, cx: &mut Context<Self>, f: impl FnOnce(&mut Self)) {
+        if self.history.viewing.is_some() {
+            return;
+        }
         self.checkpoint();
         f(self);
         self.last_edit = Instant::now() - COALESCE;
@@ -1267,6 +1302,9 @@ impl ScreenshotsView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.history.viewing.is_some() {
+            return;
+        }
         window.focus(&self.focus, cx);
         self.select(Some(id), window, cx);
         let Some(layer) = self.layer(id) else {
@@ -1409,6 +1447,13 @@ impl ScreenshotsView {
             return;
         }
         let keystroke = &event.keystroke;
+        if self.history.viewing.is_some() {
+            if keystroke.key == "escape" {
+                self.back_to_current(window, cx);
+                cx.stop_propagation();
+            }
+            return;
+        }
         let command = keystroke.modifiers.secondary(cx);
         let shift = keystroke.modifiers.shift;
         let step = if shift { 10. } else { 1. };

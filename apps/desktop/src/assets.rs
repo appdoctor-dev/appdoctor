@@ -12,8 +12,10 @@ macro_rules! extra_icons {
 }
 
 static EXTRA: &[(&str, &[u8])] = extra_icons![
+    "bookmark",
     "chart-line",
     "clapperboard",
+    "clock",
     "gauge",
     "image",
     "key-round",
@@ -27,6 +29,7 @@ static EXTRA: &[(&str, &[u8])] = extra_icons![
     "panel-top",
     "pause",
     "play",
+    "rotate-ccw",
     "smartphone",
     "scan-search",
     "sparkles",

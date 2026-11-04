@@ -4,7 +4,7 @@
 //! the storefronts they're tracked in, keywords per app and country, every
 //! rank check (the history), cached keyword popularity, competitors, the
 //! App Store Connect listing as last pulled, listing edits an AI suggested,
-//! and plain settings. Secrets never do; those go to the OS keychain.
+//! earlier versions of designs and listings, and plain settings. Secrets never do; those go to the OS keychain.
 //!
 //! The connection runs in WAL mode so a long write (a rank check recording
 //! hundreds of snapshots) never blocks the UI reading the keyword table.
@@ -13,6 +13,7 @@
 
 mod locales;
 mod migrations;
+mod versions;
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -22,6 +23,7 @@ use rusqlite::{Connection, OptionalExtension as _, params};
 use serde::{Deserialize, Serialize};
 
 pub use locales::{LOCALES, locale_name, locale_storefront, storefront_locale};
+pub use versions::{BEFORE_AGENT, DesignVersion, ListingVersion};
 
 pub type KeywordId = i64;
 

@@ -107,6 +107,35 @@ const MIGRATIONS: &[&str] = &[
         created_at        INTEGER NOT NULL,
         PRIMARY KEY (app_id, locale)
     );",
+    // 4: earlier versions of each design and each language of the listing,
+    // to go back to. `label` is the user's name for one (`named`) or what
+    // happened at the time; empty for an autosave.
+    "CREATE TABLE design_versions (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        app_id      INTEGER NOT NULL REFERENCES apps (id) ON DELETE CASCADE,
+        target      TEXT NOT NULL,
+        created_at  INTEGER NOT NULL,
+        label       TEXT NOT NULL DEFAULT '',
+        named       INTEGER NOT NULL DEFAULT 0,
+        design      BLOB NOT NULL
+    );
+    CREATE INDEX design_versions_by_target ON design_versions (app_id, target, id DESC);
+
+    CREATE TABLE listing_versions (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        app_id            INTEGER NOT NULL REFERENCES apps (id) ON DELETE CASCADE,
+        locale            TEXT NOT NULL,
+        created_at        INTEGER NOT NULL,
+        label             TEXT NOT NULL DEFAULT '',
+        named             INTEGER NOT NULL DEFAULT 0,
+        name              TEXT,
+        subtitle          TEXT,
+        keywords          TEXT,
+        promotional_text  TEXT,
+        description       TEXT,
+        whats_new         TEXT
+    );
+    CREATE INDEX listing_versions_by_locale ON listing_versions (app_id, locale, id DESC);",
 ];
 
 pub(crate) fn run(conn: &mut Connection) -> rusqlite::Result<()> {
