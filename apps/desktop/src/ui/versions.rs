@@ -178,19 +178,36 @@ pub fn confirm_delete(
     cx: &mut App,
     delete: impl Fn(&mut Window, &mut App) + 'static,
 ) {
-    let delete = Rc::new(delete);
+    confirm(
+        "Delete this version?".into(),
+        format!("“{version}” can't be brought back after this. What's there now doesn't change."),
+        "Delete",
+        window,
+        cx,
+        delete,
+    );
+}
+
+/// A dialog that asks before something destructive.
+pub fn confirm(
+    title: String,
+    body: String,
+    action: &'static str,
+    window: &mut Window,
+    cx: &mut App,
+    confirmed: impl Fn(&mut Window, &mut App) + 'static,
+) {
+    let confirmed = Rc::new(confirmed);
     window.open_dialog(cx, move |dialog, _, cx| {
-        let delete = delete.clone();
+        let confirmed = confirmed.clone();
         dialog
-            .title("Delete this version?")
+            .title(title.clone())
             .w(px(420.))
             .child(
                 div()
                     .text_size(px(13.))
                     .text_color(cx.theme().muted_foreground)
-                    .child(format!(
-                        "“{version}” can't be brought back after this. What's there now doesn't change."
-                    )),
+                    .child(body.clone()),
             )
             .footer(
                 h_flex()
@@ -206,10 +223,10 @@ pub fn confirm_delete(
                     .child(
                         Button::new("confirm-delete")
                             .danger()
-                            .label("Delete")
+                            .label(action)
                             .on_click(move |_, window, cx| {
                                 window.close_dialog(cx);
-                                delete(window, cx);
+                                confirmed(window, cx);
                             }),
                     ),
             )

@@ -45,6 +45,8 @@ user reviews and saves in AppDoctor; nothing reaches the App Store without them.
 product page and lists what to fix first. AppDoctor keeps earlier versions of each design and each language \
 of the listing: list_versions and restore_version go back to one (save_version names the design before a big \
 change), and list_listing_versions shows a language's, to bring back through suggest_listing. \
+Each design can have a version per language: pass locale (de-DE, ja…) to the design tools. A new one starts as a \
+copy of the default design, which any language without its own uses; translate its words with update_layer. \
 Start with list_apps and get_design, use design_options and list_fonts for \
 allowed values, and look at your work with render_slide before you say it's done. The user sees every \
 change live in AppDoctor and can undo it.";

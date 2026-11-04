@@ -326,3 +326,69 @@ fn accents_and_soft_shapes_reach_the_export() {
     assert!(svg.contains("feGaussianBlur") && svg.contains(r#"stroke-width="8""#));
     render_png(std::slice::from_ref(&slide), 0, CanvasSize::Iphone69, &std::env::temp_dir(), 0.1).unwrap();
 }
+
+#[test]
+fn each_language_has_its_own_design_file() {
+    let dir = std::env::temp_dir().join(format!("appdoctor-languages-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let mut next = 0;
+    let mut default = Design::default();
+    default.slides.push(Slide::starter(Target::Iphone, "Moonwake", &mut next));
+    let mut german = default.clone();
+    let LayerKind::Text { text, .. } = &mut german.slides[0].layers[0].kind else {
+        panic!("the starter begins with words");
+    };
+    *text = "Besser schlafen".into();
+
+    default.save(&dir.join(Target::Iphone.file_for(None))).unwrap();
+    german.save(&dir.join(Target::Iphone.file_for(Some("de-DE")))).unwrap();
+    german.save(&dir.join(Target::Ipad.file_for(Some("ja")))).unwrap();
+
+    assert_eq!(Target::Iphone.file_for(Some("de-DE")), "design.de-DE.json");
+    assert_eq!(Target::Ipad.file_for(Some("ja")), "design-ipad.ja.json");
+    assert_eq!(Design::languages(&dir, Target::Iphone), vec!["de-DE".to_owned()]);
+    assert_eq!(Design::languages(&dir, Target::Ipad), vec!["ja".to_owned()]);
+    assert!(Design::languages(&dir, Target::Header).is_empty());
+    assert_eq!(Design::load_language(&dir, Target::Iphone, None).slides, default.slides);
+    assert_eq!(Design::load_language(&dir, Target::Iphone, Some("de-DE")).slides, german.slides);
+    assert!(Design::load_language(&dir, Target::Iphone, Some("fr-FR")).slides.is_empty());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_language_takes_the_layout_and_keeps_its_words_and_pictures() {
+    let mut next = 0;
+    let mut default = Design::default();
+    default.slides.push(Slide::starter(Target::Iphone, "Moonwake", &mut next));
+    let mut german = default.clone();
+    for layer in &mut german.slides[0].layers {
+        match &mut layer.kind {
+            LayerKind::Text { text, size, .. } => {
+                *text = "Besser schlafen".into();
+                *size = 88.;
+                layer.name = "Besser schlafen".into();
+            }
+            LayerKind::Device { screenshot, .. } => *screenshot = Some("de.png".into()),
+            _ => {}
+        }
+    }
+    // The design moves on: a new position, background and slide.
+    default.slides[0].layers[0].y += 200.;
+    let moved_to = default.slides[0].layers[0].y;
+    default.slides[0].background = Background::Solid { color: "#000000".into() };
+    default.slides.push(default.slides[0].clone());
+
+    let merged = default.with_language(&german);
+    assert_eq!(merged.slides.len(), 2);
+    assert_eq!(merged.slides[0].background, default.slides[0].background);
+    assert_eq!(merged.slides[0].layers[0].y, moved_to);
+    let LayerKind::Text { text, size, .. } = &merged.slides[0].layers[0].kind else {
+        panic!("the starter begins with words");
+    };
+    assert_eq!((text.as_str(), *size), ("Besser schlafen", 88.));
+    assert_eq!(merged.slides[0].layers[0].name, "Besser schlafen");
+    assert!(merged.slides[0].layers.iter().any(|layer| matches!(
+        &layer.kind,
+        LayerKind::Device { screenshot: Some(file), .. } if file == "de.png"
+    )));
+}

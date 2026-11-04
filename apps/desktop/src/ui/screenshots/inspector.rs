@@ -631,6 +631,7 @@ impl ScreenshotsView {
         let Some(slide) = self.current().cloned() else {
             return v_flex();
         };
+        let languages = self.language_properties(cx);
         let (gradient, from, to, angle) = match &slide.background {
             Background::Gradient { from, to, angle } => (true, from.clone(), to.clone(), angle.round() as i32),
             Background::Solid { color } => (false, color.clone(), color.clone(), 180),
@@ -797,6 +798,7 @@ impl ScreenshotsView {
                             }),
                     ),
             )
+            .children(languages)
             .child(
                 v_flex()
                     .child(heading("Background", cx))

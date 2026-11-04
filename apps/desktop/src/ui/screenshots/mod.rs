@@ -5,7 +5,8 @@
 //! trip), so dragging and typing stay at frame rate. Export renders the
 //! same layers through `appdoctor_screenshots` with the same geometry.
 //! Designs live in the data folder: `screenshots/<app id>/design.json` for
-//! iPhone and `design-ipad.json` for iPad, beside the images they use.
+//! iPhone and `design-ipad.json` for iPad, beside the images they use, with
+//! a file per language that has its own (`languages`).
 //!
 //! An AI agent can edit the same files through `appdoctor mcp`; the view
 //! watches the file and takes in changes it didn't write, as an undoable
@@ -18,6 +19,7 @@ pub(crate) use ai::AiPanel;
 mod clips;
 mod history;
 mod inspector;
+mod languages;
 mod view;
 
 use std::path::{Path, PathBuf};
@@ -152,6 +154,11 @@ pub struct ScreenshotsView {
     app_id: Option<u64>,
     /// iPhone or iPad: which of the app's designs is open.
     target: Target,
+    /// The language open, or `None` for the default design.
+    locale: Option<String>,
+    languages: Entity<languages::LanguageSelect>,
+    /// Languages with their own copy of the open design.
+    designed_languages: Vec<String>,
     design: Design,
     /// The design file's bytes as last read or written here; anything else
     /// on disk was written by someone else (an agent).
@@ -274,8 +281,10 @@ impl ScreenshotsView {
         });
 
         let (history, history_name) = history::History::new(window, cx);
+        let (languages, language_picked) = languages::language_select(window, cx);
         let mut subscriptions = vec![
             history_name,
+            language_picked,
             cx.observe_in(&state, window, |this, _, window, cx| this.follow_app(window, cx)),
             cx.subscribe_in(&fonts, window, |this, _, event: &SelectEvent<_>, window, cx| {
                 if let SelectEvent::Confirm(Some(name)) = event
@@ -440,6 +449,9 @@ impl ScreenshotsView {
             focus: cx.focus_handle(),
             app_id: None,
             target: Target::Iphone,
+            locale: None,
+            languages,
+            designed_languages: Vec::new(),
             design: Design::default(),
             last_disk: Vec::new(),
             next_id: 0,
@@ -501,21 +513,23 @@ impl ScreenshotsView {
     }
 
     fn design_path(&self, cx: &App) -> Option<PathBuf> {
-        Some(self.folder(cx)?.join(self.target.file_name()))
+        Some(self.folder(cx)?.join(self.target.file_for(self.locale.as_deref())))
     }
 
     /// Opens the selected app's design for the target the sidebar picked.
     fn follow_app(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let state = self.state.read(cx);
         let (app, target) = (state.selected_app, state.screenshot_target);
-        if (app, target) == (self.app_id, self.target) {
+        if (app, target) == (self.app_id, self.target) && state.screenshot_locale == self.locale {
             return;
         }
+        let locale = state.screenshot_locale.clone();
         self.stop_viewing();
         self.flush(cx);
         self.version_leaving(cx);
         self.app_id = app;
         self.target = target;
+        self.locale = locale;
         self.load(window, cx);
     }
 
@@ -541,8 +555,20 @@ impl ScreenshotsView {
             .map(|app| app.name.clone())
             .unwrap_or_default();
         let target = self.target;
+        let locale = self.locale.clone();
+        let mut copied = false;
         self.design = match self.folder(cx) {
-            Some(folder) => Design::load_for(&folder, target),
+            Some(folder) => {
+                let mut design = Design::load_language(&folder, target, locale.as_deref());
+                // A language starts as a copy of the default design.
+                if locale.is_some() && design.slides.is_empty() {
+                    let default = Design::load_for(&folder, target);
+                    copied = !default.slides.is_empty();
+                    design.slides = default.slides;
+                    design.video = default.video;
+                }
+                design
+            }
             None => Design {
                 target,
                 ..Design::default()
@@ -563,7 +589,10 @@ impl ScreenshotsView {
         self.selected = None;
         self.undo.clear();
         self.redo.clear();
-        self.status = None;
+        self.status = copied.then(|| {
+            let name = appdoctor_store::locale_name(locale.as_deref().unwrap_or_default());
+            Ok(format!("{name} starts as a copy of the default."))
+        });
         self.thumbs.clear();
         self.preview = false;
         self.playing = false;
@@ -571,8 +600,9 @@ impl ScreenshotsView {
         self.time = 0.;
         self.sync_controls(window, cx);
         self.render_thumbs(cx);
+        self.refresh_languages(window, cx);
         // A new design is saved straight away, so an agent sees what you see.
-        if started {
+        if started || copied {
             self.changed(cx);
         }
         cx.notify();
@@ -1515,13 +1545,18 @@ impl ScreenshotsView {
         });
         let slides = self.design.slides.clone();
         let sizes = self.target.sizes();
+        let locale = self.locale.clone();
         cx.spawn_in(window, async move |this, cx| {
             let Ok(Ok(Some(paths))) = paths.await else {
                 return;
             };
-            let Some(target) = paths.into_iter().next() else {
+            let Some(mut target) = paths.into_iter().next() else {
                 return;
             };
+            // A language's PNGs go in a folder of their own.
+            if let Some(locale) = &locale {
+                target.push(locale);
+            }
             this.update(cx, |this, cx| {
                 this.exporting = true;
                 cx.notify();
@@ -1530,19 +1565,8 @@ impl ScreenshotsView {
             let destination = target.clone();
             let result = cx
                 .background_spawn(async move {
-                    // Recordings show their first frame in stills.
-                    let clip_source = appdoctor_video::clip_source();
-                    let mut written = 0;
-                    for size in sizes {
-                        for index in 0..slides.len() {
-                            let png = render_png_with(&slides, index, *size, &folder, 1.0, clip_source.as_ref())
-                                .map_err(|e| e.to_string())?;
-                            let name = format!("{:02}-{}.png", index + 1, size.slug());
-                            std::fs::write(destination.join(name), png).map_err(|e| e.to_string())?;
-                            written += 1;
-                        }
-                    }
-                    Ok::<_, String>(written)
+                    std::fs::create_dir_all(&destination).map_err(|e| e.to_string())?;
+                    write_pngs(&slides, sizes, &folder, &destination)
                 })
                 .await;
             this.update(cx, |this, cx| {
@@ -1792,6 +1816,22 @@ impl ScreenshotsView {
             }
         });
     }
+}
+
+/// Writes every slide as PNGs at each size. Returns how many it wrote.
+fn write_pngs(slides: &[Slide], sizes: &[CanvasSize], folder: &Path, destination: &Path) -> Result<usize, String> {
+    // Recordings show their first frame in stills.
+    let clip_source = appdoctor_video::clip_source();
+    let mut written = 0;
+    for size in sizes {
+        for index in 0..slides.len() {
+            let png = render_png_with(slides, index, *size, folder, 1.0, clip_source.as_ref()).map_err(|e| e.to_string())?;
+            let name = format!("{:02}-{}.png", index + 1, size.slug());
+            std::fs::write(destination.join(name), png).map_err(|e| e.to_string())?;
+            written += 1;
+        }
+    }
+    Ok(written)
 }
 
 fn render_thumb(

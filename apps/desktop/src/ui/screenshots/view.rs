@@ -1134,6 +1134,7 @@ impl Render for ScreenshotsView {
             .border_color(theme.border)
             .child(
                 v_flex()
+                    .flex_shrink_0()
                     .child(div().text_base().font_weight(FontWeight::SEMIBOLD).child(match self.target {
                         Target::Iphone => "iPhone screenshots",
                         Target::Ipad => "iPad screenshots",
@@ -1151,7 +1152,9 @@ impl Render for ScreenshotsView {
                         )
                     })),
             )
-            .child(div().flex_1())
+            .child(div().w(px(10.)).flex_shrink_0())
+            .child(self.language_picker(cx))
+            .child(div().flex_1().min_w(px(8.)))
             .when_some(self.status.clone(), |this, status| {
                 let (c, text) = match status {
                     Ok(text) => (meter::up(), text),
@@ -1159,12 +1162,13 @@ impl Render for ScreenshotsView {
                 };
                 this.child(
                     h_flex()
+                        .min_w_0()
                         .gap_2()
                         .items_center()
                         .max_w(px(460.))
                         .text_xs()
                         .child(status_dot(c))
-                        .child(div().truncate().text_color(c).child(text)),
+                        .child(div().min_w_0().truncate().text_color(c).child(text)),
                 )
             })
             .child(

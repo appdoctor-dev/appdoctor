@@ -69,7 +69,7 @@ pub(crate) fn call(data_dir: &Path, name: &str, args: &Args) -> Option<Result<Ve
 fn list_versions(data_dir: &Path, args: &Args) -> Result<Vec<Value>> {
     let doc = Doc::open(data_dir, args)?;
     let versions = store(data_dir)?
-        .design_versions(doc.app_id, doc.target.slug())
+        .design_versions(doc.app_id, &doc.version_key())
         .map_err(|error| error.to_string())?;
     let versions: Vec<Value> = versions
         .iter()
@@ -91,7 +91,7 @@ fn save_version(data_dir: &Path, args: &Args) -> Result<Vec<Value>> {
     let name = args.opt_str("name").map(str::trim).filter(|name| !name.is_empty());
     let name = name.ok_or("name is required")?;
     let id = store(data_dir)?
-        .save_design_version(doc.app_id, doc.target.slug(), &doc.design.to_json(), name, true, now())
+        .save_design_version(doc.app_id, &doc.version_key(), &doc.design.to_json(), name, true, now())
         .map_err(|error| error.to_string())?;
     Ok(text(json!({ "saved": name, "id": id })))
 }
@@ -100,9 +100,9 @@ fn restore_version(data_dir: &Path, args: &Args) -> Result<Vec<Value>> {
     let doc = Doc::open(data_dir, args)?;
     let id = args.u64("version")? as i64;
     let store = store(data_dir)?;
-    let target = doc.target.slug();
+    let key = doc.version_key();
     let versions = store
-        .design_versions(doc.app_id, target)
+        .design_versions(doc.app_id, &key)
         .map_err(|error| error.to_string())?;
     let version = versions
         .iter()
@@ -112,19 +112,20 @@ fn restore_version(data_dir: &Path, args: &Args) -> Result<Vec<Value>> {
     store
         .save_design_version(
             doc.app_id,
-            target,
+            &key,
             &doc.design.to_json(),
             "Before restoring",
             false,
             now(),
         )
         .map_err(|error| error.to_string())?;
+    let path = doc.path();
     let design = Design {
         slides: restored.slides,
         video: restored.video,
         ..doc.design
     };
-    write_atomic(&doc.folder.join(doc.target.file_name()), &design.to_json())
+    write_atomic(&path, &design.to_json())
         .map_err(|error| format!("Couldn't save the design: {error}"))?;
     Ok(text(json!({ "restored": id, "slides": design.slides.len() })))
 }

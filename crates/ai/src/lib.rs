@@ -330,7 +330,23 @@ pub fn run(task: &Task, on_event: &mut dyn FnMut(Event), cancel: Arc<AtomicBool>
 }
 
 /// The working rules every provider gets before the user's request.
-pub fn context(app: &str, app_id: u64, device: &str, design_folder: &Path, project: Option<&Path>) -> String {
+pub fn context(
+    app: &str,
+    app_id: u64,
+    device: &str,
+    language: Option<(&str, &str)>,
+    design_folder: &Path,
+    project: Option<&Path>,
+) -> String {
+    let language = match language {
+        Some((code, name)) => format!(
+            " This is its {name} version: pass locale \"{code}\" to the appdoctor tools too, and write every word in \
+             {name}. To translate, change only the words, in the voice of App Store captions rather than word for \
+             word, using terms people search for in {name} if the listing or tracked keywords show them. Look at each \
+             slide with render_slide, and make the text smaller where it no longer fits."
+        ),
+        None => String::new(),
+    };
     let project = match project {
         Some(project) => format!(
             "The app's source code is in {} (your working folder): read its README and the screens that matter to \
@@ -342,7 +358,7 @@ pub fn context(app: &str, app_id: u64, device: &str, design_folder: &Path, proje
     };
     format!(
         "You are working inside AppDoctor, a Mac app for App Store marketing, on the app \"{app}\" (app_id {app_id}). \
-         Work on its \"{device}\" design (pass app_id {app_id} and device \"{device}\" to the appdoctor tools). \
+         Work on its \"{device}\" design (pass app_id {app_id} and device \"{device}\" to the appdoctor tools).{language} \
          {project} The user watches the design change live in AppDoctor and chats with you in a small panel, so \
          keep your messages short and plain, without tables or code. Make sensible choices instead of asking \
          questions. For videos, start with create_video, look at your work with render_storyboard, check it with \

@@ -778,6 +778,8 @@ impl AiPanel {
         let state = self.state.read(cx);
         let data_dir = state.services.data_dir.clone();
         let target = state.screenshot_target;
+        let locale = state.screenshot_locale.clone();
+        let language = locale.as_deref().map(|code| (code, appdoctor_store::locale_name(code)));
         let folder = data_dir.join("screenshots").join(app_id.to_string());
         let project = self.project(cx);
         let resume = self
@@ -792,7 +794,14 @@ impl AiPanel {
             effort: self.effort.clone(),
             prompt: prompt.clone(),
             context: match self.mode {
-                Mode::Design => appdoctor_ai::context(&app_name, app_id, target.slug(), &folder, project.as_deref()),
+                Mode::Design => appdoctor_ai::context(
+                    &app_name,
+                    app_id,
+                    target.slug(),
+                    language.as_ref().map(|(code, name)| (*code, name.as_str())),
+                    &folder,
+                    project.as_deref(),
+                ),
                 Mode::Listing => appdoctor_ai::listing_context(
                     &app_name,
                     app_id,

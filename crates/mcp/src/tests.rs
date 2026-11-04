@@ -506,3 +506,47 @@ fn a_listings_versions_can_be_read() {
     assert_eq!(listed["versions"][0]["label"], "From App Store Connect");
     assert_eq!(listed["versions"][0]["fields"]["name"]["text"], "Strobia");
 }
+
+#[test]
+fn a_design_has_a_version_per_language() {
+    let dir = data_dir("languages");
+    let server = Server::new(dir.clone());
+    let folder = dir.join("screenshots").join(APP.to_string());
+    call_json(&server, "add_slide", json!({ "app_id": APP }));
+    let added = call_json(
+        &server,
+        "add_layer",
+        json!({ "app_id": APP, "slide": 0, "kind": "text", "text": "Sleep better" }),
+    );
+    let layer = added["layer"]["id"].clone();
+
+    // A new language starts as a copy, and doesn't touch the default.
+    call_json(
+        &server,
+        "update_layer",
+        json!({ "app_id": APP, "locale": "de-DE", "layer_id": layer, "text": "Besser schlafen" }),
+    );
+    let words = |design: &Design| match &design.slides[0].layers[0].kind {
+        LayerKind::Text { text, .. } => text.clone(),
+        _ => panic!("expected words"),
+    };
+    assert_eq!(words(&Design::load_for(&folder, Target::Iphone)), "Sleep better");
+    assert_eq!(
+        words(&Design::load_language(&folder, Target::Iphone, Some("de-DE"))),
+        "Besser schlafen"
+    );
+
+    let german = call_json(&server, "get_design", json!({ "app_id": APP, "locale": "de-DE" }));
+    assert_eq!(german["locale"], "de-DE");
+    assert_eq!(german["languages"], json!(["de-DE"]));
+
+    // Its history is its own.
+    call_json(&server, "save_version", json!({ "app_id": APP, "locale": "de-DE", "name": "Erste" }));
+    let store = Store::open(&dir.join("appdoctor.db")).unwrap();
+    assert!(store.design_versions(APP, "iphone/de-DE").unwrap().iter().any(|v| v.label == "Erste"));
+    assert!(!store.design_versions(APP, "iphone").unwrap().iter().any(|v| v.label == "Erste"));
+
+    let (content, failed) = call(&server, "get_design", json!({ "app_id": APP, "locale": "klingon" }));
+    assert!(failed);
+    assert!(content[0]["text"].as_str().unwrap().contains("de-DE"));
+}

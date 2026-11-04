@@ -57,6 +57,8 @@ pub struct AppState {
     pub section: Section,
     /// Which design the Screenshots section shows.
     pub screenshot_target: appdoctor_screenshots::Target,
+    /// The language of the design open in Screenshots; `None` is the default design.
+    pub screenshot_locale: Option<String>,
     pub apps: Vec<AppRecord>,
     pub selected_app: Option<u64>,
     /// The storefront the keyword table shows and new keywords go to.
@@ -86,6 +88,7 @@ impl AppState {
             icons,
             section: Section::Keywords,
             screenshot_target: appdoctor_screenshots::Target::Iphone,
+            screenshot_locale: None,
             apps: Vec::new(),
             selected_app: None,
             country: "us".into(),
@@ -164,6 +167,11 @@ impl AppState {
         cx.notify();
     }
 
+    pub fn set_screenshot_locale(&mut self, locale: Option<String>, cx: &mut Context<Self>) {
+        self.screenshot_locale = locale;
+        cx.notify();
+    }
+
     pub fn set_country(&mut self, country: &str, cx: &mut Context<Self>) {
         self.country = country.to_ascii_lowercase();
         cx.notify();
@@ -211,6 +219,7 @@ impl AppState {
     pub fn select_app(&mut self, id: u64, cx: &mut Context<Self>) {
         if self.selected_app != Some(id) {
             self.selected_app = Some(id);
+            self.screenshot_locale = None;
             if let Some(app) = self.app(id) {
                 self.country = app.country.clone();
             }

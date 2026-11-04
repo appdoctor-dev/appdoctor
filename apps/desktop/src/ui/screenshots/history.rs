@@ -114,8 +114,12 @@ fn thumb_key(slides: &[Slide], index: usize) -> u64 {
 }
 
 impl ScreenshotsView {
+    fn version_key(&self) -> String {
+        self.target.version_key(self.locale.as_deref())
+    }
+
     /// Saves what's there now as a version, unless the newest one is the same.
-    fn store_version(&mut self, label: &str, named: bool, cx: &mut Context<Self>) {
+    pub(super) fn store_version(&mut self, label: &str, named: bool, cx: &mut Context<Self>) {
         let Some(app_id) = self.app_id else {
             return;
         };
@@ -126,7 +130,7 @@ impl ScreenshotsView {
         let saved =
             services
                 .store
-                .save_design_version(app_id, self.target.slug(), &self.design.to_json(), label, named, now());
+                .save_design_version(app_id, &self.version_key(), &self.design.to_json(), label, named, now());
         if let Err(error) = saved {
             tracing::warn!(%error, "couldn't save a version of the design");
         }
@@ -205,13 +209,13 @@ impl ScreenshotsView {
             return;
         };
         let services = self.state.read(cx).services.clone();
-        let target = self.target.slug();
+        let key = self.version_key();
         self.history._load = Some(cx.spawn(async move |this, cx| {
             let versions = cx
                 .background_spawn(async move {
                     services
                         .store
-                        .design_versions(app_id, target)
+                        .design_versions(app_id, &key)
                         .unwrap_or_default()
                         .into_iter()
                         .filter_map(|version| {

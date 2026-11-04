@@ -9,7 +9,7 @@ use appdoctor_screenshots::{
     Placement, SUGGESTED_FONTS, Slide, Sound, SoundEffect, Target, Transition, Video, font_families, has_font, import_image, import_media,
     import_svg, motion, parse_color, render_frame, render_png_with, write_atomic,
 };
-use appdoctor_store::Store;
+use appdoctor_store::{LOCALES, Store};
 use base64::Engine as _;
 use serde_json::{Value, json};
 
@@ -23,6 +23,10 @@ pub(crate) fn design_args() -> Value {
             "type": "string",
             "enum": ["iphone", "ipad", "header", "search"],
             "description": "Which design: iphone screenshots (canvas 1320 x 2868), ipad screenshots (2064 x 2752), the product page header (21:9, 3840 x 1646) or the search result art (3:2, 3840 x 2560). Defaults to iphone."
+        },
+        "locale": {
+            "type": "string",
+            "description": "A language's own version of the design, as App Store Connect codes it (de-DE, ja, fr-FR…). A new one starts as a copy of the default design. Leave it out for the default design, which every language without its own uses."
         }
     })
 }
@@ -565,6 +569,7 @@ fn list_fonts(query: Option<&str>) -> Value {
 pub(crate) struct Doc {
     data_dir: PathBuf,
     pub(crate) app_id: u64,
+    pub(crate) locale: Option<String>,
     pub(crate) folder: PathBuf,
     pub(crate) target: Target,
     pub(crate) design: Design,
@@ -582,11 +587,22 @@ impl Doc {
             None => Target::Iphone,
             Some(slug) => Target::from_slug(slug).ok_or_else(|| format!("device should be iphone or ipad, not {slug:?}"))?,
         };
+        let locale = match args.opt_str("locale") {
+            None => None,
+            Some(code) if LOCALES.iter().any(|(known, _)| *known == code) => Some(code.to_owned()),
+            Some(code) => return Err(format!("{code:?} isn't one of App Store Connect's languages, such as de-DE, ja or fr-FR.")),
+        };
         let folder = screenshots_folder(data_dir, app_id);
-        let design = Design::load_for(&folder, target);
+        let mut design = Design::load_language(&folder, target, locale.as_deref());
+        if locale.is_some() && design.slides.is_empty() {
+            let default = Design::load_for(&folder, target);
+            design.slides = default.slides;
+            design.video = default.video;
+        }
         Ok(Doc {
             data_dir: data_dir.to_owned(),
             app_id,
+            locale,
             folder,
             target,
             design,
@@ -594,13 +610,21 @@ impl Doc {
     }
 
     pub(crate) fn save(&self) -> Result<()> {
-        let path = self.folder.join(self.target.file_name());
+        let path = self.path();
         // What the agent is changing stays in the design's history. That's
         // no reason to refuse the edit if it can't be kept.
         if let (Ok(before), Ok(store)) = (std::fs::read(&path), store(&self.data_dir)) {
-            let _ = store.save_design_before_agent(self.app_id, self.target.slug(), &before, crate::listing::now());
+            let _ = store.save_design_before_agent(self.app_id, &self.version_key(), &before, crate::listing::now());
         }
         write_atomic(&path, &self.design.to_json()).map_err(|error| format!("Couldn't save the design: {error}"))
+    }
+
+    pub(crate) fn path(&self) -> PathBuf {
+        self.folder.join(self.target.file_for(self.locale.as_deref()))
+    }
+
+    pub(crate) fn version_key(&self) -> String {
+        self.target.version_key(self.locale.as_deref())
     }
 
     pub(crate) fn next_id(&self) -> u64 {
@@ -630,6 +654,8 @@ impl Doc {
         json!({
             "app_id": self.app_id,
             "device": self.target.slug(),
+            "locale": self.locale,
+            "languages": Design::languages(&self.folder, self.target),
             "canvas": { "width": width, "height": height },
             "exports": self.target.sizes().iter().map(|s| s.label()).collect::<Vec<_>>(),
             "video": self.design.video.as_ref().map(|video| json!({
@@ -1188,7 +1214,8 @@ fn export_video(data_dir: &Path, args: &Args) -> Result<Vec<Value>> {
         return Err("This design isn't a video yet: call set_video with enabled true first.".into());
     }
     let folder = PathBuf::from(args.opt_str("folder").ok_or("folder is required")?);
-    let out = folder.join(format!("{}.mp4", doc.target.video_size().slug()));
+    let language = doc.locale.as_ref().map_or_else(String::new, |locale| format!("-{locale}"));
+    let out = folder.join(format!("{}{language}.mp4", doc.target.video_size().slug()));
     appdoctor_video::export(&doc.design, &doc.folder, &out, |_| true).map_err(|error| error.to_string())?;
     Ok(text(json!({
         "written": out.display().to_string(),
@@ -1236,7 +1263,10 @@ fn render_slide(data_dir: &Path, args: &Args) -> Result<Vec<Value>> {
 fn export(data_dir: &Path, args: &Args) -> Result<Vec<Value>> {
     let doc = Doc::open(data_dir, args)?;
     let folder = args.opt_str("folder").ok_or("folder is required")?;
-    let destination = PathBuf::from(folder);
+    let destination = match &doc.locale {
+        Some(locale) => PathBuf::from(folder).join(locale),
+        None => PathBuf::from(folder),
+    };
     std::fs::create_dir_all(&destination).map_err(|error| format!("Couldn't create {folder}: {error}"))?;
     let mut written = Vec::new();
     let clips = appdoctor_video::clip_source();

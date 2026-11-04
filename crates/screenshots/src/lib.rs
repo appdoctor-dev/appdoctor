@@ -126,6 +126,23 @@ impl Target {
         }
     }
 
+    /// The file of a language's own version of the design, or of the default
+    /// design for `None`: `design.de-DE.json` beside `design.json`.
+    pub fn file_for(self, locale: Option<&str>) -> String {
+        match locale {
+            Some(locale) => format!("{}.{locale}.json", self.file_name().trim_end_matches(".json")),
+            None => self.file_name().to_owned(),
+        }
+    }
+
+    /// What the design's version history is kept under.
+    pub fn version_key(self, locale: Option<&str>) -> String {
+        match locale {
+            Some(locale) => format!("{}/{locale}", self.slug()),
+            None => self.slug().to_owned(),
+        }
+    }
+
     /// The device new layers get.
     pub fn default_model(self) -> DeviceModel {
         let slug = match self {
@@ -687,6 +704,60 @@ impl Design {
     pub fn load_for(folder: &Path, target: Target) -> Design {
         let mut design = Design::load(&folder.join(target.file_name()));
         design.target = target;
+        design
+    }
+
+    /// Loads a language's own version of a design, or the default design for
+    /// `None`. Empty when the language has none yet.
+    pub fn load_language(folder: &Path, target: Target, locale: Option<&str>) -> Design {
+        let mut design = Design::load(&folder.join(target.file_for(locale)));
+        design.target = target;
+        design
+    }
+
+    /// The languages with their own version of a design, by App Store Connect
+    /// code. The default design is used for any other.
+    pub fn languages(folder: &Path, target: Target) -> Vec<String> {
+        let stem = format!("{}.", target.file_name().trim_end_matches(".json"));
+        let mut languages: Vec<String> = std::fs::read_dir(folder)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|entry| {
+                let name = entry.file_name().into_string().ok()?;
+                let locale = name.strip_prefix(&stem)?.strip_suffix(".json")?;
+                (!locale.is_empty() && !locale.contains('.')).then(|| locale.to_owned())
+            })
+            .collect();
+        languages.sort();
+        languages
+    }
+
+    /// This design's layout with a language's own words and pictures, matched
+    /// by layer, so changes to the design reach a language already translated.
+    pub fn with_language(&self, language: &Design) -> Design {
+        let mut design = self.clone();
+        let layers: Vec<&Layer> = language.slides.iter().flat_map(|slide| &slide.layers).collect();
+        for layer in design.slides.iter_mut().flat_map(|slide| &mut slide.layers) {
+            let Some(theirs) = layers.iter().find(|theirs| theirs.id == layer.id) else {
+                continue;
+            };
+            match (&mut layer.kind, &theirs.kind) {
+                (LayerKind::Text { text, size, .. }, LayerKind::Text { text: words, size: own_size, .. }) => {
+                    text.clone_from(words);
+                    *size = *own_size;
+                    layer.name.clone_from(&theirs.name);
+                }
+                (LayerKind::Device { screenshot, .. }, LayerKind::Device { screenshot: Some(theirs), .. }) => {
+                    *screenshot = Some(theirs.clone());
+                }
+                (LayerKind::Image { file, .. }, LayerKind::Image { file: Some(theirs), .. }) => {
+                    *file = Some(theirs.clone());
+                }
+                _ => continue,
+            }
+            layer.fit_text();
+        }
         design
     }
 

@@ -41,6 +41,7 @@ Marketing search terms: **aso tool**, **aso keyword research tools**.
 ### Screenshot designer
 - Device frames (current iPhone/iPad/Mac sizes), text and caption editor, backgrounds, layout presets, all App Store sizes
 - AI "art director" that builds a screenshot from a prompt (concept from the user's appshots project; new code)
+- A version of each design per language: pick a language and it starts as a copy of the default design, with its own words, pictures and history. Your AI translates it in one click; Update Layout takes later changes from the default and keeps the translated words; each language exports to its own folder, or all at once
 - Version history for each design: versions save as you work and before an AI's edits, you can name one to keep it, click any to see it on the canvas, and restore it (undoable)
 
 ### App preview video designer
